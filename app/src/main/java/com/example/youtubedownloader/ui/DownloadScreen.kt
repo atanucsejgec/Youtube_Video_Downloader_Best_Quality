@@ -398,45 +398,140 @@ private fun PlaylistCard(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QualityDropdown(
-    selected: VideoQuality, formatSizes: Map<VideoQuality, String>,
+    selected: VideoQuality,
+    formatSizes: Map<VideoQuality, String>,
     onSelect: (VideoQuality) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
         val sizeLabel = formatSizes[selected]
         OutlinedTextField(
             value = if (!sizeLabel.isNullOrBlank()) "${selected.label}  ·  $sizeLabel"
             else selected.label,
-            onValueChange = {}, readOnly = true,
+            onValueChange = {},
+            readOnly = true,
             label = { Text("Quality") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor()
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor()
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            VideoQuality.entries.forEach { q ->
-                val size = formatSizes[q]
-                DropdownMenuItem(
-                    text = {
-                        Row(Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(q.label)
-                            if (!size.isNullOrBlank()) {
-                                Text(size, style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    },
-                    onClick = { onSelect(q); expanded = false },
-                    leadingIcon = {
-                        Icon(if (q.isAudioOnly) Icons.Default.MusicNote
-                        else Icons.Default.Videocam, null, Modifier.size(20.dp))
-                    }
-                )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            // ── Video Resolutions ──
+            SectionHeader("📹 Video Quality")
+            listOf(
+                VideoQuality.BEST_8K,
+                VideoQuality.UHD_4K,
+                VideoQuality.QHD_2K,
+                VideoQuality.FHD,
+                VideoQuality.HD,
+                VideoQuality.SD,
+                VideoQuality.LOW
+            ).forEach { q ->
+                QualityItem(q, formatSizes[q], selected == q) {
+                    onSelect(q); expanded = false
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+
+            // ── Codec Specific ──
+            SectionHeader("🎯 Codec Specific")
+            listOf(
+                VideoQuality.BEST_AV1,
+                VideoQuality.BEST_H264,
+                VideoQuality.BEST_VP9,
+                VideoQuality.BEST_HDR
+            ).forEach { q ->
+                QualityItem(q, formatSizes[q], selected == q) {
+                    onSelect(q); expanded = false
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+
+            // ── Audio Only ──
+            SectionHeader("🎵 Audio Only")
+            listOf(
+                VideoQuality.AUDIO_BEST,
+                VideoQuality.AUDIO_M4A,
+                VideoQuality.AUDIO_MP3,
+                VideoQuality.AUDIO_OPUS
+            ).forEach { q ->
+                QualityItem(q, formatSizes[q], selected == q) {
+                    onSelect(q); expanded = false
+                }
             }
         }
     }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+    )
+}
+
+@Composable
+private fun QualityItem(
+    q: VideoQuality,
+    size: String?,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isSelected) {
+                        Icon(
+                            Icons.Default.Check, null,
+                            Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        q.label,
+                        fontWeight = if (isSelected) FontWeight.Bold
+                        else FontWeight.Normal
+                    )
+                }
+                if (!size.isNullOrBlank()) {
+                    Text(
+                        size,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        },
+        onClick = onClick,
+        leadingIcon = {
+            Icon(
+                if (q.isAudioOnly) Icons.Default.MusicNote
+                else Icons.Default.Videocam,
+                null, Modifier.size(20.dp)
+            )
+        }
+    )
 }
 
 @Composable

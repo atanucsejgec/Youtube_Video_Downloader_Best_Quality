@@ -60,13 +60,77 @@ enum class VideoQuality(
     val formatArg: String,
     val isAudioOnly: Boolean = false
 ) {
-    BEST("Best Quality", "bestvideo+bestaudio/best"),
-    FHD("1080p", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
-    HD("720p", "bestvideo[height<=720]+bestaudio/best[height<=720]"),
-    SD("480p", "bestvideo[height<=480]+bestaudio/best[height<=480]"),
-    LOW("360p", "bestvideo[height<=360]+bestaudio/best[height<=360]"),
-    AUDIO_M4A("Audio · M4A", "bestaudio[ext=m4a]/bestaudio", true),
-    AUDIO_MP3("Audio · MP3", "bestaudio", true);
+    // ── Video Qualities ──
+    BEST_8K(
+        "8K · Best Possible",
+        "bestvideo[height>=4320]+bestaudio/bestvideo+bestaudio/best"
+    ),
+    UHD_4K(
+        "4K · 2160p",
+        "bestvideo[height<=2160]+bestaudio/best[height<=2160]"
+    ),
+    QHD_2K(
+        "2K · 1440p",
+        "bestvideo[height<=1440]+bestaudio/best[height<=1440]"
+    ),
+    FHD(
+        "1080p · Full HD",
+        "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+    ),
+    HD(
+        "720p · HD",
+        "bestvideo[height<=720]+bestaudio/best[height<=720]"
+    ),
+    SD(
+        "480p",
+        "bestvideo[height<=480]+bestaudio/best[height<=480]"
+    ),
+    LOW(
+        "360p · Data Saver",
+        "bestvideo[height<=360]+bestaudio/best[height<=360]"
+    ),
+
+    // ── Codec-Specific (better quality or compatibility) ──
+    BEST_AV1(
+        "Best AV1 · Highest Quality",
+        "bestvideo[vcodec^=av01]+bestaudio/bestvideo+bestaudio/best"
+    ),
+    BEST_H264(
+        "Best H.264 · Most Compatible",
+        "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/best"
+    ),
+    BEST_VP9(
+        "Best VP9",
+        "bestvideo[vcodec^=vp9]+bestaudio/bestvideo+bestaudio/best"
+    ),
+    BEST_HDR(
+        "Best HDR",
+        "bestvideo[dynamic_range=HDR]+bestaudio/bestvideo+bestaudio/best"
+    ),
+
+    // ── Audio Only ──
+    AUDIO_BEST(
+        "Audio · Best Quality",
+        "bestaudio/best",
+        true
+    ),
+    AUDIO_M4A(
+        "Audio · M4A (AAC)",
+        "bestaudio[ext=m4a]/bestaudio",
+        true
+    ),
+    AUDIO_MP3(
+        "Audio · MP3",
+        "bestaudio",
+        true
+    ),
+    AUDIO_OPUS(
+        "Audio · Opus (Smallest)",
+        "bestaudio[acodec=opus]/bestaudio",
+        true
+    );
+
+    val isVideo: Boolean get() = !isAudioOnly
 }
 
 sealed interface UiState {
@@ -379,9 +443,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     addOption("-o", "${tempDir.absolutePath}/%(title).150s.%(ext)s")
                     addOption("--restrict-filenames")
                     addOption("--no-mtime")
+                    addOption("--no-cache-dir")
+
                     if (q.isAudioOnly && q == VideoQuality.AUDIO_MP3) {
-                        addOption("-x"); addOption("--audio-format", "mp3")
-                    } else if (!q.isAudioOnly) {
+                        addOption("-x")
+                        addOption("--audio-format", "mp3")
+                    } else if (q.isAudioOnly && q == VideoQuality.AUDIO_OPUS) {
+                        addOption("-x")
+                        addOption("--audio-format", "opus")
+                    } else if (q.isAudioOnly) {
+                        // M4A or best audio — no conversion
+                    } else {
                         addOption("--merge-output-format", "mp4")
                     }
                 }
@@ -438,9 +510,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 addOption("-o", "${tempDir.absolutePath}/%(title).150s.%(ext)s")
                 addOption("--restrict-filenames")
                 addOption("--no-mtime")
+                addOption("--no-cache-dir")
+
                 if (q.isAudioOnly && q == VideoQuality.AUDIO_MP3) {
-                    addOption("-x"); addOption("--audio-format", "mp3")
-                } else if (!q.isAudioOnly) {
+                    addOption("-x")
+                    addOption("--audio-format", "mp3")
+                } else if (q.isAudioOnly && q == VideoQuality.AUDIO_OPUS) {
+                    addOption("-x")
+                    addOption("--audio-format", "opus")
+                } else if (q.isAudioOnly) {
+                    // M4A or best audio — no conversion needed
+                } else {
                     addOption("--merge-output-format", "mp4")
                 }
             }
@@ -601,7 +681,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val formatsArray = json.optJSONArray("formats") ?: return result
         val durationSec = json.optDouble("duration", 0.0).toLong()
 
-        data class Fmt(val height: Int, val size: Long)
+        data class Fmt(val height: Int, val size: Long, val codec: String)
+
         val videoFormats = mutableListOf<Fmt>()
         var bestAudioSize = 0L
 
@@ -622,33 +703,78 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val hasVideo = vcodec != "none" && vcodec.isNotEmpty()
             val hasAudio = acodec != "none" && acodec.isNotEmpty()
 
-            if (hasVideo && !hasAudio && height > 0) videoFormats.add(Fmt(height, filesize))
-            if (hasAudio && !hasVideo && filesize > bestAudioSize) bestAudioSize = filesize
+            if (hasVideo && !hasAudio && height > 0)
+                videoFormats.add(Fmt(height, filesize, vcodec))
+            if (hasAudio && !hasVideo && filesize > bestAudioSize)
+                bestAudioSize = filesize
         }
 
+        // ── Resolution-based qualities ──
         val targets = mapOf(
-            VideoQuality.FHD to 1080, VideoQuality.HD to 720,
-            VideoQuality.SD to 480, VideoQuality.LOW to 360
+            VideoQuality.BEST_8K to 9999,
+            VideoQuality.UHD_4K to 2160,
+            VideoQuality.QHD_2K to 1440,
+            VideoQuality.FHD to 1080,
+            VideoQuality.HD to 720,
+            VideoQuality.SD to 480,
+            VideoQuality.LOW to 360
         )
+
         for ((quality, targetH) in targets) {
-            val vf = videoFormats.filter { it.height in 1..targetH }.maxByOrNull { it.height }
+            val vf = if (quality == VideoQuality.BEST_8K) {
+                videoFormats.maxByOrNull { it.height }
+            } else {
+                videoFormats.filter { it.height in 1..targetH }
+                    .maxByOrNull { it.height }
+            }
             if (vf != null) {
                 val total = vf.size + bestAudioSize
                 if (total > 0) result[quality] = formatBytes(total)
             }
         }
+
+        // ── Codec-specific qualities ──
+        val av1 = videoFormats.filter { it.codec.startsWith("av01") }
+            .maxByOrNull { it.height }
+        if (av1 != null) {
+            val total = av1.size + bestAudioSize
+            if (total > 0) result[VideoQuality.BEST_AV1] =
+                "${formatBytes(total)} · ${av1.height}p"
+        }
+
+        val h264 = videoFormats.filter { it.codec.startsWith("avc1") }
+            .maxByOrNull { it.height }
+        if (h264 != null) {
+            val total = h264.size + bestAudioSize
+            if (total > 0) result[VideoQuality.BEST_H264] =
+                "${formatBytes(total)} · ${h264.height}p"
+        }
+
+        val vp9 = videoFormats.filter { it.codec.startsWith("vp9") || it.codec.startsWith("vp09") }
+            .maxByOrNull { it.height }
+        if (vp9 != null) {
+            val total = vp9.size + bestAudioSize
+            if (total > 0) result[VideoQuality.BEST_VP9] =
+                "${formatBytes(total)} · ${vp9.height}p"
+        }
+
+        // HDR — estimate same as best
         val bestVideo = videoFormats.maxByOrNull { it.height }
         if (bestVideo != null) {
             val total = bestVideo.size + bestAudioSize
-            if (total > 0) result[VideoQuality.BEST] = formatBytes(total)
+            if (total > 0) result[VideoQuality.BEST_HDR] = formatBytes(total)
         }
+
+        // ── Audio qualities ──
         if (bestAudioSize > 0) {
+            result[VideoQuality.AUDIO_BEST] = formatBytes(bestAudioSize)
             result[VideoQuality.AUDIO_M4A] = formatBytes(bestAudioSize)
             result[VideoQuality.AUDIO_MP3] = formatBytes(bestAudioSize)
+            result[VideoQuality.AUDIO_OPUS] = formatBytes((bestAudioSize * 0.7).toLong())
         }
+
         return result
     }
-
     private fun formatBytes(bytes: Long): String = when {
         bytes <= 0 -> ""
         bytes < 1024L * 1024 -> "~%.0f KB".format(bytes / 1024.0)
