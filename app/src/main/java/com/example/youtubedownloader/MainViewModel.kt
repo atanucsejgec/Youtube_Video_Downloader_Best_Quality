@@ -8,6 +8,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.yausername.ffmpeg.FFmpeg
@@ -16,6 +17,8 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,8 +28,10 @@ import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
 
-/* ═══════════════ Data Models ═══════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  DATA MODELS
+ * ═══════════════════════════════════════════════════════ */
+@Immutable
 data class VideoDetails(
     val title: String,
     val thumbnail: String?,
@@ -34,11 +39,24 @@ data class VideoDetails(
     val author: String?
 )
 
+@Immutable
 data class PlaylistInfo(
     val title: String,
     val count: Int
 )
-
+@Immutable
+data class PlaylistEntry(
+    val id: String,
+    val title: String
+)
+@Immutable
+data class SavedFileInfo(
+    val displayPath: String,
+    val mimeType: String,
+    val contentUri: String?,
+    val absolutePath: String?
+)
+@Immutable
 enum class VideoQuality(
     val label: String,
     val formatArg: String,
@@ -52,36 +70,42 @@ enum class VideoQuality(
     AUDIO_M4A("Audio · M4A", "bestaudio[ext=m4a]/bestaudio", true),
     AUDIO_MP3("Audio · MP3", "bestaudio", true);
 }
-
+@Immutable
 sealed interface UiState {
     data object Idle : UiState
     data object Initializing : UiState
     data object FetchingInfo : UiState
+    @Immutable
     data class InfoReady(
         val details: VideoDetails,
         val formatSizes: Map<VideoQuality, String>,
         val playlistInfo: PlaylistInfo?
     ) : UiState
-
+    @Immutable
     data class Downloading(
         val details: VideoDetails,
         val progress: Float,
         val eta: Long = 0L,
         val line: String = "",
         val currentItem: Int = 1,
-        val totalItems: Int = 1
+        val totalItems: Int = 1,
+        val currentVideoTitle: String = ""
     ) : UiState
-
+    @Immutable
     data class Completed(
         val details: VideoDetails,
         val savedLocation: String,
-        val fileCount: Int = 1
+        val fileCount: Int,
+        val failedCount: Int = 0,
+        val lastFile: SavedFileInfo? = null
     ) : UiState
-
+    @Immutable
     data class Error(val message: String) : UiState
 }
 
-/* ═══════════════ ViewModel ═══════════════ */
+/* ═══════════════════════════════════════════════════════
+ *  VIEW MODEL
+ * ═══════════════════════════════════════════════════════ */
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -105,7 +129,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var isEngineReady = false
     private var job: Job? = null
     private var processId: String? = null
-    private var detectedPlaylist: PlaylistInfo? = null
+
+    // Playlist data populated during fetchInfo
+    private var playlistEntries: List<PlaylistEntry> = emptyList()
+    private var cachedFormatSizes: Map<VideoQuality, String> = emptyMap()
+    private var cachedPlaylistInfo: PlaylistInfo? = null
 
     private val tempDir: File
         get() = File(
@@ -117,7 +145,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val sw = StringWriter(); printStackTrace(PrintWriter(sw)); return sw.toString()
     }
 
-    /* ── Init ── */
+    /* ═══════════════ INIT ═══════════════ */
 
     init {
         initEngine()
@@ -142,9 +170,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     Log.w(TAG, "Update skipped: ${e.message}")
                 }
 
-                // Clean up any leftover temp files
                 cleanTempDir()
-
                 _uiState.value = UiState.Idle
             } catch (e: Exception) {
                 Log.e(TAG, "Init failed", e)
@@ -153,7 +179,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /* ── Public Actions ── */
+    /* ═══════════════ PUBLIC ACTIONS ═══════════════ */
 
     fun updateUrl(v: String) { _url.value = v }
     fun selectQuality(q: VideoQuality) { _quality.value = q }
@@ -172,7 +198,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         job = viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = UiState.FetchingInfo
             try {
-                // ── Step 1: Get JSON dump ──
+                // ── Get JSON dump ──
                 val request = YoutubeDLRequest(videoUrl).apply {
                     addOption("--dump-single-json")
                     addOption("--flat-playlist")
@@ -182,7 +208,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val result = YoutubeDL.getInstance().execute(request)
                 val json = parseJson(result.out)
 
-                // ── Step 2: Check if playlist ──
+                // ── Check if playlist ──
                 val isPlaylist = json.optString("_type") == "playlist" ||
                         json.has("entries")
 
@@ -191,35 +217,51 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
                 if (isPlaylist) {
                     val entries = json.optJSONArray("entries")
-                    val count = json.optInt("playlist_count",
-                        entries?.length() ?: 0)
+                    val count = json.optInt("playlist_count", entries?.length() ?: 0)
                     val plTitle = json.optString("title", "Playlist")
                     playlistInfo = PlaylistInfo(plTitle, count)
-                    detectedPlaylist = playlistInfo
+                    cachedPlaylistInfo = playlistInfo
                     _downloadAsPlaylist.value = true
 
-                    Log.d(TAG, "Playlist detected: $plTitle ($count videos)")
-
-                    // Get format info from first video
-                    val firstId = entries?.optJSONObject(0)?.optString("id")
-                    if (firstId != null) {
-                        val vReq = YoutubeDLRequest(
-                            "https://www.youtube.com/watch?v=$firstId"
-                        ).apply {
-                            addOption("--dump-single-json")
-                            addOption("--no-playlist")
-                            addOption("--no-warnings")
-                            addOption("--force-ipv4")
+                    // Parse entries for one-by-one download
+                    val parsedEntries = mutableListOf<PlaylistEntry>()
+                    if (entries != null) {
+                        for (i in 0 until entries.length()) {
+                            val entry = entries.optJSONObject(i) ?: continue
+                            val id = entry.optString("id", "")
+                            val title = entry.optString("title", "Video ${i + 1}")
+                            if (id.isNotBlank()) {
+                                parsedEntries.add(PlaylistEntry(id, title))
+                            }
                         }
-                        val vResult = YoutubeDL.getInstance().execute(vReq)
-                        videoJson = parseJson(vResult.out)
+                    }
+                    playlistEntries = parsedEntries
+                    Log.d(TAG, "Playlist: $plTitle, ${parsedEntries.size} videos")
+
+                    // Get format info from first video for size estimates
+                    if (parsedEntries.isNotEmpty()) {
+                        try {
+                            val vReq = YoutubeDLRequest(
+                                "https://www.youtube.com/watch?v=${parsedEntries[0].id}"
+                            ).apply {
+                                addOption("--dump-single-json")
+                                addOption("--no-playlist")
+                                addOption("--no-warnings")
+                                addOption("--force-ipv4")
+                            }
+                            val vResult = YoutubeDL.getInstance().execute(vReq)
+                            videoJson = parseJson(vResult.out)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Couldn't get first video info: ${e.message}")
+                        }
                     }
                 } else {
-                    detectedPlaylist = null
+                    cachedPlaylistInfo = null
+                    playlistEntries = emptyList()
                     _downloadAsPlaylist.value = false
                 }
 
-                // ── Step 3: Parse video details ──
+                // ── Parse video details ──
                 val details = VideoDetails(
                     title = videoJson.optString("title", "Unknown"),
                     thumbnail = videoJson.optString("thumbnail", null),
@@ -227,13 +269,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     author = videoJson.optString("uploader", null)
                 )
 
-                // ── Step 4: Parse format sizes ──
+                // ── Parse format sizes ──
                 val formatSizes = calculateFormatSizes(videoJson)
+                cachedFormatSizes = formatSizes
 
                 _uiState.value = UiState.InfoReady(details, formatSizes, playlistInfo)
 
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
                 Log.e(TAG, "fetchInfo failed", e)
                 _uiState.value = UiState.Error(
                     "Fetch failed:\n${e.javaClass.simpleName}: ${e.message}"
@@ -245,47 +289,96 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun startDownload() {
         val videoUrl = _url.value.trim()
         val q = _quality.value
-        val asPlaylist = _downloadAsPlaylist.value
+        val asPlaylist = _downloadAsPlaylist.value && playlistEntries.isNotEmpty()
 
         if (!isEngineReady) {
             _uiState.value = UiState.Error("Engine not ready"); return
         }
 
-        val details: VideoDetails
-        val playlistInfo: PlaylistInfo?
-
-        when (val s = _uiState.value) {
-            is UiState.InfoReady -> {
-                details = s.details; playlistInfo = s.playlistInfo
-            }
-            is UiState.Completed -> {
-                details = s.details; playlistInfo = null
-            }
+        val details: VideoDetails = when (val s = _uiState.value) {
+            is UiState.InfoReady -> s.details
+            is UiState.Completed -> s.details
             else -> {
                 _uiState.value = UiState.Error("Fetch info first"); return
             }
         }
 
-        val totalItems = if (asPlaylist) playlistInfo?.count ?: 1 else 1
-
         job?.cancel()
         job = viewModelScope.launch(Dispatchers.IO) {
+            if (asPlaylist) {
+                downloadPlaylistOneByOne(details, q)
+            } else {
+                downloadSingleAndSave(videoUrl, details, q)
+            }
+        }
+    }
+
+    fun cancelDownload() {
+        processId?.let {
+            try { YoutubeDL.getInstance().destroyProcessById(it) } catch (_: Exception) {}
+        }
+        job?.cancel()
+        cleanTempDir()
+        _uiState.value = UiState.Idle
+    }
+
+    fun reset() {
+        job?.cancel()
+        _url.value = ""
+        playlistEntries = emptyList()
+        cachedPlaylistInfo = null
+        cachedFormatSizes = emptyMap()
+        _downloadAsPlaylist.value = false
+        cleanTempDir()
+        if (isEngineReady) _uiState.value = UiState.Idle else initEngine()
+    }
+
+    /* ═══════════════ ONE-BY-ONE PLAYLIST DOWNLOAD ═══════════════ */
+
+    private suspend fun downloadPlaylistOneByOne(
+        details: VideoDetails,
+        q: VideoQuality
+    ) {
+        var savedCount = 0
+        var failedCount = 0
+        var lastFile: SavedFileInfo? = null
+        val total = playlistEntries.size
+
+        Log.d(TAG, "Starting playlist download: $total videos")
+
+        for ((index, entry) in playlistEntries.withIndex()) {
+            // Check if coroutine is still active (user might cancel)
+            currentCoroutineContext().ensureActive()
+
+
+            val videoNum = index + 1
+            Log.d(TAG, "Downloading video $videoNum/$total: ${entry.title}")
+
             _uiState.value = UiState.Downloading(
-                details, 0f, totalItems = totalItems
+                details = details,
+                progress = 0f,
+                currentItem = videoNum,
+                totalItems = total,
+                currentVideoTitle = entry.title
             )
 
             try {
-                // Clean temp before download
+                // ── Clean temp before each video ──
                 cleanTempDir()
 
-                val pid = System.currentTimeMillis().toString()
+                val pid = "dl_${index}_${System.currentTimeMillis()}"
                 processId = pid
 
+                val videoUrl = "https://www.youtube.com/watch?v=${entry.id}"
+
                 val request = YoutubeDLRequest(videoUrl).apply {
-                    if (!asPlaylist) addOption("--no-playlist")
+                    addOption("--no-playlist")
                     addOption("--force-ipv4")
                     addOption("-f", q.formatArg)
-                    addOption("-o", "${tempDir.absolutePath}/%(title).150s.%(ext)s")
+                    addOption(
+                        "-o",
+                        "${tempDir.absolutePath}/%(title).150s.%(ext)s"
+                    )
                     addOption("--restrict-filenames")
                     addOption("--no-mtime")
 
@@ -297,80 +390,239 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
 
-                var currentItem = 1
-
+                // ── Execute download ──
                 YoutubeDL.getInstance().execute(request, pid) { progress, eta, line ->
-                    // Parse "Downloading item X of Y" for playlists
-                    val itemMatch = Regex(
-                        """Downloading (?:item|video) (\d+) of (\d+)"""
-                    ).find(line)
-                    if (itemMatch != null) {
-                        currentItem = itemMatch.groupValues[1].toIntOrNull() ?: currentItem
-                    }
-
                     _uiState.value = UiState.Downloading(
                         details = details,
                         progress = progress,
                         eta = eta,
                         line = line,
-                        currentItem = currentItem,
-                        totalItems = totalItems
+                        currentItem = videoNum,
+                        totalItems = total,
+                        currentVideoTitle = entry.title
                     )
                 }
 
-                // ── Save all downloaded files to Gallery ──
-                val files = tempDir.listFiles()?.filter { it.isFile } ?: emptyList()
-                var savedCount = 0
-                var savedLocation = ""
+                // ── Save to gallery immediately ──
+                val downloadedFile = tempDir.listFiles()
+                    ?.filter { it.isFile && it.length() > 0 }
+                    ?.maxByOrNull { it.lastModified() }
 
-                for (file in files) {
-                    val loc = saveToGallery(file)
-                    if (loc != null) {
+                if (downloadedFile != null) {
+                    val saved = saveToGallery(downloadedFile)
+                    if (saved != null) {
                         savedCount++
-                        savedLocation = loc
-                        file.delete()
-                        Log.d(TAG, "✅ Saved to gallery: $loc")
+                        lastFile = saved
+                        Log.d(TAG, "✅ Saved video $videoNum: ${saved.displayPath}")
+                    } else {
+                        failedCount++
+                        Log.e(TAG, "❌ Gallery save failed for video $videoNum")
                     }
+                    // Delete temp file immediately
+                    downloadedFile.delete()
+                } else {
+                    failedCount++
+                    Log.e(TAG, "❌ No downloaded file found for video $videoNum")
                 }
 
-                // Clean up temp dir
+            } catch (e: CancellationException) {
+                Log.d(TAG, "Download cancelled at video $videoNum")
                 cleanTempDir()
+                throw e
+            } catch (e: Exception) {
+                failedCount++
+                Log.e(TAG, "❌ Failed video $videoNum: ${e.message}")
+            }
 
-                if (savedCount == 0) {
-                    savedLocation = tempDir.absolutePath
-                }
+            // ── Clean temp after each video ──
+            cleanTempDir()
+        }
 
-                _uiState.value = UiState.Completed(
-                    details, savedLocation, savedCount
+        // ── Final cleanup ──
+        cleanTempDir()
+
+        val location = lastFile?.displayPath?.substringBeforeLast('/') ?: "Gallery"
+
+        _uiState.value = UiState.Completed(
+            details = details,
+            savedLocation = location,
+            fileCount = savedCount,
+            failedCount = failedCount,
+            lastFile = lastFile
+        )
+
+        Log.d(TAG, "Playlist done: $savedCount saved, $failedCount failed")
+    }
+
+    /* ═══════════════ SINGLE VIDEO DOWNLOAD ═══════════════ */
+
+    private suspend fun downloadSingleAndSave(
+        videoUrl: String,
+        details: VideoDetails,
+        q: VideoQuality
+    ) {
+        _uiState.value = UiState.Downloading(details, 0f)
+
+        try {
+            cleanTempDir()
+
+            val pid = System.currentTimeMillis().toString()
+            processId = pid
+
+            val request = YoutubeDLRequest(videoUrl).apply {
+                addOption("--no-playlist")
+                addOption("--force-ipv4")
+                addOption("-f", q.formatArg)
+                addOption(
+                    "-o",
+                    "${tempDir.absolutePath}/%(title).150s.%(ext)s"
                 )
+                addOption("--restrict-filenames")
+                addOption("--no-mtime")
 
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) {
-                Log.e(TAG, "Download failed", e)
-                _uiState.value = UiState.Error(
-                    "Download failed:\n${e.javaClass.simpleName}: ${e.message}"
+                if (q.isAudioOnly && q == VideoQuality.AUDIO_MP3) {
+                    addOption("-x")
+                    addOption("--audio-format", "mp3")
+                } else if (!q.isAudioOnly) {
+                    addOption("--merge-output-format", "mp4")
+                }
+            }
+
+            YoutubeDL.getInstance().execute(request, pid) { progress, eta, line ->
+                _uiState.value = UiState.Downloading(
+                    details = details,
+                    progress = progress,
+                    eta = eta,
+                    line = line
                 )
             }
+
+            // Save to gallery
+            val downloadedFile = tempDir.listFiles()
+                ?.filter { it.isFile && it.length() > 0 }
+                ?.maxByOrNull { it.lastModified() }
+
+            var savedFile: SavedFileInfo? = null
+
+            if (downloadedFile != null) {
+                savedFile = saveToGallery(downloadedFile)
+                downloadedFile.delete()
+            }
+
+            cleanTempDir()
+
+            _uiState.value = UiState.Completed(
+                details = details,
+                savedLocation = savedFile?.displayPath ?: "Gallery",
+                fileCount = if (savedFile != null) 1 else 0,
+                failedCount = if (savedFile == null) 1 else 0,
+                lastFile = savedFile
+            )
+
+        } catch (e: CancellationException) {
+            cleanTempDir()
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Download failed", e)
+            cleanTempDir()
+            _uiState.value = UiState.Error(
+                "Download failed:\n${e.javaClass.simpleName}: ${e.message}"
+            )
         }
     }
 
-    fun cancelDownload() {
-        processId?.let {
-            try { YoutubeDL.getInstance().destroyProcessById(it) } catch (_: Exception) {}
+    /* ═══════════════ GALLERY SAVE ═══════════════ */
+
+    private fun saveToGallery(sourceFile: File): SavedFileInfo? {
+        val mime = mimeOf(sourceFile.name)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            saveToGalleryQ(sourceFile, mime)     // ← only called on Q+
+        } else {
+            saveToGalleryLegacy(sourceFile, mime) // ← pre-Q
         }
-        job?.cancel()
-        _uiState.value = UiState.Idle
     }
 
-    fun reset() {
-        job?.cancel()
-        _url.value = ""
-        detectedPlaylist = null
-        _downloadAsPlaylist.value = false
-        if (isEngineReady) _uiState.value = UiState.Idle else initEngine()
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun saveToGalleryQ(sourceFile: File, mime: String): SavedFileInfo? {
+        val context = getApplication<Application>()
+        val resolver = context.contentResolver
+        val isVideo = mime.startsWith("video")
+        val isAudio = mime.startsWith("audio")
+
+        val (collection, relativePath) = when {
+            isVideo -> MediaStore.Video.Media.getContentUri(
+                MediaStore.VOLUME_EXTERNAL_PRIMARY
+            ) to "${Environment.DIRECTORY_MOVIES}/YTDownloader"
+
+            isAudio -> MediaStore.Audio.Media.getContentUri(
+                MediaStore.VOLUME_EXTERNAL_PRIMARY
+            ) to "${Environment.DIRECTORY_MUSIC}/YTDownloader"
+
+            else -> MediaStore.Downloads.getContentUri(
+                MediaStore.VOLUME_EXTERNAL_PRIMARY
+            ) to "${Environment.DIRECTORY_DOWNLOADS}/YTDownloader"
+        }
+
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, sourceFile.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+
+        val uri = resolver.insert(collection, values) ?: return null
+
+        resolver.openOutputStream(uri)?.use { output ->
+            sourceFile.inputStream().use { input -> input.copyTo(output) }
+        }
+
+        values.clear()
+        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+
+        return SavedFileInfo(
+            displayPath = "$relativePath/${sourceFile.name}",
+            mimeType = mime,
+            contentUri = uri.toString(),
+            absolutePath = null
+        )
     }
 
-    /* ═══════════════ Format Size Calculation ═══════════════ */
+    @Suppress("DEPRECATION")
+    private fun saveToGalleryLegacy(sourceFile: File, mime: String): SavedFileInfo? {
+        val context = getApplication<Application>()
+        val isVideo = mime.startsWith("video")
+        val isAudio = mime.startsWith("audio")
+
+        val baseDir = when {
+            isVideo -> Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_MOVIES
+            )
+            isAudio -> Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_MUSIC
+            )
+            else -> Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS
+            )
+        }
+
+        val destDir = File(baseDir, "YTDownloader").also { it.mkdirs() }
+        val destFile = File(destDir, sourceFile.name)
+        sourceFile.copyTo(destFile, overwrite = true)
+
+        MediaScannerConnection.scanFile(
+            context, arrayOf(destFile.absolutePath), arrayOf(mime), null
+        )
+
+        return SavedFileInfo(
+            displayPath = destFile.absolutePath,
+            mimeType = mime,
+            contentUri = null,
+            absolutePath = destFile.absolutePath
+        )
+    }
+
+    /* ═══════════════ FORMAT SIZES ═══════════════ */
 
     private fun calculateFormatSizes(json: JSONObject): Map<VideoQuality, String> {
         val result = mutableMapOf<VideoQuality, String>()
@@ -442,101 +694,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         else -> "~%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
     }
 
-    /* ═══════════════ Gallery Save ═══════════════ */
-
-    private fun saveToGallery(sourceFile: File): String? {
-        val context = getApplication<Application>()
-        val mime = mimeOf(sourceFile.name)
-        val isVideo = mime.startsWith("video")
-        val isAudio = mime.startsWith("audio")
-
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            saveToGalleryQ(sourceFile, mime, isVideo, isAudio)
-        } else {
-            saveToGalleryLegacy(sourceFile, mime, isVideo, isAudio)
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private fun saveToGalleryQ(
-        sourceFile: File, mime: String, isVideo: Boolean, isAudio: Boolean
-    ): String? {
-        val context = getApplication<Application>()
-        val resolver = context.contentResolver
-
-        val (collection, relativePath) = when {
-            isVideo -> MediaStore.Video.Media.getContentUri(
-                MediaStore.VOLUME_EXTERNAL_PRIMARY
-            ) to "${Environment.DIRECTORY_MOVIES}/YTDownloader"
-
-            isAudio -> MediaStore.Audio.Media.getContentUri(
-                MediaStore.VOLUME_EXTERNAL_PRIMARY
-            ) to "${Environment.DIRECTORY_MUSIC}/YTDownloader"
-
-            else -> MediaStore.Downloads.getContentUri(
-                MediaStore.VOLUME_EXTERNAL_PRIMARY
-            ) to "${Environment.DIRECTORY_DOWNLOADS}/YTDownloader"
-        }
-
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, sourceFile.name)
-            put(MediaStore.MediaColumns.MIME_TYPE, mime)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-            put(MediaStore.MediaColumns.IS_PENDING, 1)
-        }
-
-        val uri = resolver.insert(collection, values) ?: return null
-
-        resolver.openOutputStream(uri)?.use { output ->
-            sourceFile.inputStream().use { input -> input.copyTo(output) }
-        }
-
-        values.clear()
-        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-        resolver.update(uri, values, null, null)
-
-        return "$relativePath/${sourceFile.name}"
-    }
-
-    @Suppress("DEPRECATION")
-    private fun saveToGalleryLegacy(
-        sourceFile: File, mime: String, isVideo: Boolean, isAudio: Boolean
-    ): String? {
-        val context = getApplication<Application>()
-        val baseDir = when {
-            isVideo -> Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_MOVIES
-            )
-            isAudio -> Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_MUSIC
-            )
-            else -> Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS
-            )
-        }
-
-        val destDir = File(baseDir, "YTDownloader").also { it.mkdirs() }
-        val destFile = File(destDir, sourceFile.name)
-        sourceFile.copyTo(destFile, overwrite = true)
-
-        MediaScannerConnection.scanFile(
-            context, arrayOf(destFile.absolutePath), arrayOf(mime), null
-        )
-
-        return destFile.absolutePath
-    }
-
-    /* ═══════════════ Helpers ═══════════════ */
+    /* ═══════════════ HELPERS ═══════════════ */
 
     private fun parseJson(raw: String): JSONObject {
         val trimmed = raw.trim()
         return try {
             JSONObject(trimmed)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             val start = trimmed.indexOf('{')
             val end = trimmed.lastIndexOf('}')
-            if (start >= 0 && end > start)
-                JSONObject(trimmed.substring(start, end + 1))
+            if (start >= 0 && end > start) JSONObject(trimmed.substring(start, end + 1))
             else throw Exception("Could not parse video info JSON")
         }
     }

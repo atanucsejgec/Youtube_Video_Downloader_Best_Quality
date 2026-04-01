@@ -2,6 +2,8 @@ package com.example.youtubedownloader.ui
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -66,6 +68,7 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                 url = url,
                 onUrlChange = vm::updateUrl,
                 enabled = uiState !is UiState.Initializing
+                        && uiState !is UiState.Downloading
             )
 
             /* ── Fetch button ── */
@@ -85,7 +88,10 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                     )
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (uiState is UiState.FetchingInfo) "Fetching…" else "Fetch Video Info")
+                Text(
+                    if (uiState is UiState.FetchingInfo) "Fetching…"
+                    else "Fetch Video Info"
+                )
             }
 
             /* ── Video info card ── */
@@ -132,9 +138,8 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                         buildString {
                             append("Download · ${quality.label}")
                             if (!sizeLabel.isNullOrBlank()) append(" · $sizeLabel")
-                            if (dlAsPlaylist && playlistInfo != null) {
+                            if (dlAsPlaylist && playlistInfo != null)
                                 append(" × ${playlistInfo.count}")
-                            }
                         }
                     )
                 }
@@ -149,6 +154,7 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                     line = st.line,
                     currentItem = st.currentItem,
                     totalItems = st.totalItems,
+                    currentVideoTitle = st.currentVideoTitle,
                     onCancel = vm::cancelDownload
                 )
             }
@@ -156,7 +162,12 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
             /* ── Completed ── */
             if (uiState is UiState.Completed) {
                 val st = uiState as UiState.Completed
-                CompletedSection(st.savedLocation, st.fileCount)
+                CompletedSection(
+                    savedLocation = st.savedLocation,
+                    fileCount = st.fileCount,
+                    failedCount = st.failedCount,
+                    lastFile = st.lastFile
+                )
             }
 
             /* ── Error ── */
@@ -167,6 +178,8 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                     onRetry = vm::initEngine
                 )
             }
+
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
@@ -216,7 +229,9 @@ private fun VideoInfoCard(d: VideoDetails) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(200.dp)
-                        .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                        .clip(
+                            RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+                        )
                 )
             }
             Column(
@@ -260,7 +275,10 @@ private fun PlaylistCard(
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Default.PlaylistPlay, null,
@@ -277,7 +295,9 @@ private fun PlaylistCard(
                     Text(
                         "${info.title} · ${info.count} videos",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(
+                            alpha = 0.8f
+                        ),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -300,6 +320,16 @@ private fun PlaylistCard(
                     onCheckedChange = onToggle
                 )
             }
+
+            if (downloadAsPlaylist) {
+                Text(
+                    "💡 Videos download one-by-one to save storage",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(
+                        alpha = 0.6f
+                    )
+                )
+            }
         }
     }
 }
@@ -319,12 +349,15 @@ private fun QualityDropdown(
     ) {
         val sizeLabel = formatSizes[selected]
         OutlinedTextField(
-            value = if (!sizeLabel.isNullOrBlank()) "${selected.label}  ·  $sizeLabel"
+            value = if (!sizeLabel.isNullOrBlank())
+                "${selected.label}  ·  $sizeLabel"
             else selected.label,
             onValueChange = {},
             readOnly = true,
             label = { Text("Quality") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            trailingIcon = {
+                ExposedDropdownMenuDefaults.TrailingIcon(expanded)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor()
@@ -375,6 +408,7 @@ private fun ProgressSection(
     line: String,
     currentItem: Int,
     totalItems: Int,
+    currentVideoTitle: String,
     onCancel: () -> Unit
 ) {
     Card(
@@ -387,21 +421,44 @@ private fun ProgressSection(
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            /* ── Header ── */
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Downloading…", fontWeight = FontWeight.SemiBold)
                 if (totalItems > 1) {
-                    Text(
-                        "Video $currentItem / $totalItems",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            "  $currentItem / $totalItems  ",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.padding(
+                                horizontal = 8.dp, vertical = 4.dp
+                            )
+                        )
+                    }
                 }
             }
 
+            /* ── Current video title (playlist) ── */
+            if (totalItems > 1 && currentVideoTitle.isNotBlank()) {
+                Text(
+                    "🎬 $currentVideoTitle",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            /* ── Progress bar ── */
             LinearProgressIndicator(
                 progress = { (progress / 100f).coerceIn(0f, 1f) },
                 modifier = Modifier
@@ -414,9 +471,33 @@ private fun ProgressSection(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("${progress.toInt()}%", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "${progress.toInt()}%",
+                    style = MaterialTheme.typography.bodySmall
+                )
                 if (eta > 0) Text(
-                    "ETA ${eta}s", style = MaterialTheme.typography.bodySmall
+                    "ETA ${eta}s",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            /* ── Overall progress for playlists ── */
+            if (totalItems > 1) {
+                val overallPercent = ((currentItem - 1) * 100f +
+                        progress) / totalItems
+                LinearProgressIndicator(
+                    progress = { (overallPercent / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    trackColor = MaterialTheme.colorScheme.tertiaryContainer,
+                )
+                Text(
+                    "Overall: ${overallPercent.toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary
                 )
             }
 
@@ -440,7 +521,14 @@ private fun ProgressSection(
 }
 
 @Composable
-private fun CompletedSection(savedLocation: String, fileCount: Int) {
+private fun CompletedSection(
+    savedLocation: String,
+    fileCount: Int,
+    failedCount: Int,
+    lastFile: SavedFileInfo?
+) {
+    val context = LocalContext.current
+
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -449,38 +537,93 @@ private fun CompletedSection(savedLocation: String, fileCount: Int) {
     ) {
         Column(
             Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            /* ── Header ── */
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Default.CheckCircle, null,
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Saved to Gallery!", fontWeight = FontWeight.Bold)
-            }
-
-            if (fileCount > 1) {
                 Text(
-                    "$fileCount files saved",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
+                    "Saved to Gallery!",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium
                 )
             }
 
+            /* ── Stats ── */
+            if (fileCount > 1 || failedCount > 0) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(
+                        "✅ $fileCount saved",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (failedCount > 0) {
+                        Text(
+                            "❌ $failedCount failed",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+
+            /* ── Location ── */
             Text(
                 "📁 $savedLocation",
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
+
+            /* ── Open & Share Buttons ── */
+            if (lastFile != null) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // ── Open Button ──
+                    Button(
+                        onClick = { openSavedFile(context, lastFile) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Default.PlayArrow, null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Open")
+                    }
+
+                    // ── Share Button ──
+                    OutlinedButton(
+                        onClick = { shareSavedFile(context, lastFile) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Default.Share, null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Share")
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun ErrorSection(msg: String, onDismiss: () -> Unit, onRetry: () -> Unit = {}) {
+private fun ErrorSection(
+    msg: String,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit = {}
+) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -492,9 +635,16 @@ private fun ErrorSection(msg: String, onDismiss: () -> Unit, onRetry: () -> Unit
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Error, null, tint = MaterialTheme.colorScheme.error)
+                Icon(
+                    Icons.Default.Error, null,
+                    tint = MaterialTheme.colorScheme.error
+                )
                 Spacer(Modifier.width(8.dp))
-                Text("Error", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                Text(
+                    "Error",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
 
             SelectionContainer {
@@ -527,9 +677,14 @@ private fun BannerCard(text: String, showSpinner: Boolean = false) {
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             if (showSpinner) {
-                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(
+                    Modifier.size(24.dp), strokeWidth = 2.dp
+                )
                 Spacer(Modifier.width(12.dp))
             }
             Text(text)
@@ -545,4 +700,55 @@ private fun formatDuration(seconds: Long): String {
     val s = seconds % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, s)
     else "%d:%02d".format(m, s)
+}
+
+private fun getFileUri(context: Context, fileInfo: SavedFileInfo): Uri {
+    // Q+: Use content:// URI from MediaStore
+    if (fileInfo.contentUri != null) {
+        return Uri.parse(fileInfo.contentUri)
+    }
+    // Pre-Q: Use FileProvider with absolute path
+    if (fileInfo.absolutePath != null) {
+        return FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.provider",
+            File(fileInfo.absolutePath)
+        )
+    }
+    throw IllegalStateException("No URI available")
+}
+
+private fun openSavedFile(context: Context, fileInfo: SavedFileInfo) {
+    try {
+        val uri = getFileUri(context, fileInfo)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, fileInfo.mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Open with"))
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "No app found to open this file",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+}
+
+private fun shareSavedFile(context: Context, fileInfo: SavedFileInfo) {
+    try {
+        val uri = getFileUri(context, fileInfo)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = fileInfo.mimeType
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Share via"))
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "Failed to share file",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
 }

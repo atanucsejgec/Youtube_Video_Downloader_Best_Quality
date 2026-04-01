@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <external-files-path name="downloads" path="YTDownloader/" />
+    <external-files-path name="temp" path="YTDownloader_temp/" />
+    <external-path name="movies" path="Movies/YTDownloader/" />
+    <external-path name="music" path="Music/YTDownloader/" />
+    <external-path name="downloads_pub" path="Download/YTDownloader/" />
 </paths>
