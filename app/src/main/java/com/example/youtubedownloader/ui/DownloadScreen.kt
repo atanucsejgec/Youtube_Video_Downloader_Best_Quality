@@ -34,8 +34,9 @@ import java.io.File
 fun DownloadScreen(vm: MainViewModel = viewModel()) {
 
     val uiState by vm.uiState.collectAsStateWithLifecycle()
-    val url     by vm.url.collectAsStateWithLifecycle()
+    val url by vm.url.collectAsStateWithLifecycle()
     val quality by vm.quality.collectAsStateWithLifecycle()
+    val dlAsPlaylist by vm.downloadAsPlaylist.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -56,19 +57,18 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
 
-            /* ── Initializing banner ── */
             if (uiState is UiState.Initializing) {
                 BannerCard("Initializing engine…", showSpinner = true)
             }
 
             /* ── URL input ── */
             UrlInput(
-                url         = url,
+                url = url,
                 onUrlChange = vm::updateUrl,
-                enabled     = uiState !is UiState.Initializing
+                enabled = uiState !is UiState.Initializing
             )
 
-            /* ── Fetch info button ── */
+            /* ── Fetch button ── */
             Button(
                 onClick = { vm.fetchInfo() },
                 enabled = url.isNotBlank()
@@ -80,37 +80,63 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                 if (uiState is UiState.FetchingInfo) {
                     CircularProgressIndicator(
                         Modifier.size(20.dp),
-                        color       = MaterialTheme.colorScheme.onPrimary,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         strokeWidth = 2.dp
                     )
                     Spacer(Modifier.width(8.dp))
                 }
-                Text("Fetch Video Info")
+                Text(if (uiState is UiState.FetchingInfo) "Fetching…" else "Fetch Video Info")
             }
 
             /* ── Video info card ── */
             val details = when (uiState) {
-                is UiState.InfoReady   -> (uiState as UiState.InfoReady).details
+                is UiState.InfoReady -> (uiState as UiState.InfoReady).details
                 is UiState.Downloading -> (uiState as UiState.Downloading).details
-                is UiState.Completed   -> (uiState as UiState.Completed).details
+                is UiState.Completed -> (uiState as UiState.Completed).details
                 else -> null
             }
             if (details != null) VideoInfoCard(details)
 
-            /* ── Quality selector ── */
+            /* ── Playlist info ── */
+            val playlistInfo = when (uiState) {
+                is UiState.InfoReady -> (uiState as UiState.InfoReady).playlistInfo
+                else -> null
+            }
+            if (playlistInfo != null) {
+                PlaylistCard(
+                    info = playlistInfo,
+                    downloadAsPlaylist = dlAsPlaylist,
+                    onToggle = vm::setDownloadAsPlaylist
+                )
+            }
+
+            /* ── Quality selector with sizes ── */
+            val formatSizes = when (uiState) {
+                is UiState.InfoReady -> (uiState as UiState.InfoReady).formatSizes
+                else -> emptyMap()
+            }
             if (uiState is UiState.InfoReady || uiState is UiState.Completed) {
-                QualityDropdown(quality, vm::selectQuality)
+                QualityDropdown(quality, formatSizes, vm::selectQuality)
             }
 
             /* ── Download button ── */
             if (uiState is UiState.InfoReady || uiState is UiState.Completed) {
+                val sizeLabel = formatSizes[quality]
                 Button(
-                    onClick  = { vm.startDownload() },
+                    onClick = { vm.startDownload() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Download, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Download  ·  ${quality.label}")
+                    Text(
+                        buildString {
+                            append("Download · ${quality.label}")
+                            if (!sizeLabel.isNullOrBlank()) append(" · $sizeLabel")
+                            if (dlAsPlaylist && playlistInfo != null) {
+                                append(" × ${playlistInfo.count}")
+                            }
+                        }
+                    )
                 }
             }
 
@@ -118,7 +144,11 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
             if (uiState is UiState.Downloading) {
                 val st = uiState as UiState.Downloading
                 ProgressSection(
-                    st.progress, st.eta, st.line,
+                    progress = st.progress,
+                    eta = st.eta,
+                    line = st.line,
+                    currentItem = st.currentItem,
+                    totalItems = st.totalItems,
                     onCancel = vm::cancelDownload
                 )
             }
@@ -126,15 +156,15 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
             /* ── Completed ── */
             if (uiState is UiState.Completed) {
                 val st = uiState as UiState.Completed
-                CompletedSection(st.filePath)
+                CompletedSection(st.savedLocation, st.fileCount)
             }
 
             /* ── Error ── */
             if (uiState is UiState.Error) {
                 ErrorSection(
-                    msg       = (uiState as UiState.Error).message,
+                    msg = (uiState as UiState.Error).message,
                     onDismiss = vm::reset,
-                    onRetry   = vm::initEngine
+                    onRetry = vm::initEngine
                 )
             }
         }
@@ -144,24 +174,27 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
 /* ═══════════════ Sub-Composables ═══════════════ */
 
 @Composable
-private fun UrlInput(
-    url: String,
-    onUrlChange: (String) -> Unit,
-    enabled: Boolean
-) {
+private fun UrlInput(url: String, onUrlChange: (String) -> Unit, enabled: Boolean) {
     val clipboard = LocalClipboardManager.current
     OutlinedTextField(
-        value         = url,
+        value = url,
         onValueChange = onUrlChange,
-        label         = { Text("YouTube URL") },
-        placeholder   = { Text("https://www.youtube.com/watch?v=…") },
-        singleLine    = true,
-        enabled       = enabled,
-        trailingIcon  = {
-            IconButton(onClick = {
-                clipboard.getText()?.text?.let { onUrlChange(it) }
-            }) {
-                Icon(Icons.Default.ContentPaste, "Paste")
+        label = { Text("YouTube URL") },
+        placeholder = { Text("Paste video or playlist URL") },
+        singleLine = true,
+        enabled = enabled,
+        trailingIcon = {
+            Row {
+                if (url.isNotBlank()) {
+                    IconButton(onClick = { onUrlChange("") }) {
+                        Icon(Icons.Default.Clear, "Clear")
+                    }
+                }
+                IconButton(onClick = {
+                    clipboard.getText()?.text?.let { onUrlChange(it) }
+                }) {
+                    Icon(Icons.Default.ContentPaste, "Paste")
+                }
             }
         },
         modifier = Modifier.fillMaxWidth()
@@ -172,22 +205,18 @@ private fun UrlInput(
 private fun VideoInfoCard(d: VideoDetails) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column {
             d.thumbnail?.let { thumbUrl ->
                 AsyncImage(
-                    model              = thumbUrl,
+                    model = thumbUrl,
                     contentDescription = null,
-                    contentScale       = ContentScale.Crop,
-                    modifier           = Modifier
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
                         .fillMaxWidth()
                         .height(200.dp)
-                        .clip(
-                            RoundedCornerShape(
-                                topStart = 12.dp, topEnd = 12.dp
-                            )
-                        )
+                        .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
                 )
             }
             Column(
@@ -197,8 +226,8 @@ private fun VideoInfoCard(d: VideoDetails) {
                 Text(
                     d.title,
                     fontWeight = FontWeight.Bold,
-                    maxLines   = 2,
-                    overflow   = TextOverflow.Ellipsis
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
                 d.author?.let {
                     Text(
@@ -207,9 +236,68 @@ private fun VideoInfoCard(d: VideoDetails) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                if (d.duration > 0) {
+                    Text(
+                        "Duration: ${formatDuration(d.duration)}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistCard(
+    info: PlaylistInfo,
+    downloadAsPlaylist: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.PlaylistPlay, null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text(
+                        "Playlist Detected",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        "${info.title} · ${info.count} videos",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    "Duration: ${formatDuration(d.duration)}",
-                    style = MaterialTheme.typography.bodySmall
+                    if (downloadAsPlaylist) "Download all ${info.count} videos"
+                    else "Download single video only",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Switch(
+                    checked = downloadAsPlaylist,
+                    onCheckedChange = onToggle
                 )
             }
         }
@@ -220,42 +308,58 @@ private fun VideoInfoCard(d: VideoDetails) {
 @Composable
 private fun QualityDropdown(
     selected: VideoQuality,
+    formatSizes: Map<VideoQuality, String>,
     onSelect: (VideoQuality) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
     ExposedDropdownMenuBox(
-        expanded         = expanded,
+        expanded = expanded,
         onExpandedChange = { expanded = !expanded }
     ) {
+        val sizeLabel = formatSizes[selected]
         OutlinedTextField(
-            value         = selected.label,
+            value = if (!sizeLabel.isNullOrBlank()) "${selected.label}  ·  $sizeLabel"
+            else selected.label,
             onValueChange = {},
-            readOnly      = true,
-            label         = { Text("Quality") },
-            trailingIcon  = {
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded)
-            },
+            readOnly = true,
+            label = { Text("Quality") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor()
         )
         ExposedDropdownMenu(
-            expanded         = expanded,
+            expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
             VideoQuality.entries.forEach { q ->
+                val size = formatSizes[q]
                 DropdownMenuItem(
-                    text = { Text(q.label) },
-                    onClick = {
-                        onSelect(q)
-                        expanded = false
+                    text = {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(q.label)
+                            if (!size.isNullOrBlank()) {
+                                Text(
+                                    size,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     },
+                    onClick = { onSelect(q); expanded = false },
                     leadingIcon = {
                         Icon(
                             if (q.isAudioOnly) Icons.Default.MusicNote
                             else Icons.Default.Videocam,
-                            contentDescription = null
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 )
@@ -269,6 +373,8 @@ private fun ProgressSection(
     progress: Float,
     eta: Long,
     line: String,
+    currentItem: Int,
+    totalItems: Int,
     onCancel: () -> Unit
 ) {
     Card(
@@ -281,7 +387,20 @@ private fun ProgressSection(
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("Downloading…", fontWeight = FontWeight.SemiBold)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Downloading…", fontWeight = FontWeight.SemiBold)
+                if (totalItems > 1) {
+                    Text(
+                        "Video $currentItem / $totalItems",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
 
             LinearProgressIndicator(
                 progress = { (progress / 100f).coerceIn(0f, 1f) },
@@ -295,30 +414,23 @@ private fun ProgressSection(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    "${progress.toInt()}%",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Text("${progress.toInt()}%", style = MaterialTheme.typography.bodySmall)
                 if (eta > 0) Text(
-                    "ETA ${eta}s",
-                    style = MaterialTheme.typography.bodySmall
+                    "ETA ${eta}s", style = MaterialTheme.typography.bodySmall
                 )
             }
 
             if (line.isNotBlank()) {
                 Text(
                     line,
-                    style    = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color    = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            OutlinedButton(
-                onClick  = onCancel,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            OutlinedButton(onClick = onCancel, Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Cancel, null)
                 Spacer(Modifier.width(6.dp))
                 Text("Cancel")
@@ -328,8 +440,7 @@ private fun ProgressSection(
 }
 
 @Composable
-private fun CompletedSection(filePath: String) {
-    val context = LocalContext.current
+private fun CompletedSection(savedLocation: String, fileCount: Int) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -346,37 +457,30 @@ private fun CompletedSection(filePath: String) {
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Download complete!", fontWeight = FontWeight.Bold)
+                Text("Saved to Gallery!", fontWeight = FontWeight.Bold)
             }
+
+            if (fileCount > 1) {
+                Text(
+                    "$fileCount files saved",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
             Text(
-                filePath,
-                style    = MaterialTheme.typography.labelSmall,
+                "📁 $savedLocation",
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { shareFile(context, filePath) }) {
-                    Icon(Icons.Default.Share, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Share")
-                }
-                OutlinedButton(onClick = { openFile(context, filePath) }) {
-                    Icon(Icons.Default.OpenInNew, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Open")
-                }
-            }
         }
     }
 }
 
 @Composable
-private fun ErrorSection(
-    msg: String,
-    onDismiss: () -> Unit,
-    onRetry: () -> Unit = {}
-) {
+private fun ErrorSection(msg: String, onDismiss: () -> Unit, onRetry: () -> Unit = {}) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -388,19 +492,11 @@ private fun ErrorSection(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.Error, null,
-                    tint = MaterialTheme.colorScheme.error
-                )
+                Icon(Icons.Default.Error, null, tint = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    "Error",
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.error
-                )
+                Text("Error", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
             }
 
-            // ✅ Show full error — scrollable
             SelectionContainer {
                 Text(
                     msg,
@@ -415,11 +511,9 @@ private fun ErrorSection(
                 TextButton(onClick = onRetry) {
                     Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Retry Init")
+                    Text("Retry")
                 }
-                TextButton(onClick = onDismiss) {
-                    Text("Dismiss")
-                }
+                TextButton(onClick = onDismiss) { Text("Dismiss") }
             }
         }
     }
@@ -433,14 +527,9 @@ private fun BannerCard(text: String, showSpinner: Boolean = false) {
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
-        Row(
-            Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             if (showSpinner) {
-                CircularProgressIndicator(
-                    Modifier.size(24.dp), strokeWidth = 2.dp
-                )
+                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(12.dp))
             }
             Text(text)
@@ -456,46 +545,4 @@ private fun formatDuration(seconds: Long): String {
     val s = seconds % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, s)
     else "%d:%02d".format(m, s)
-}
-
-private fun mimeOf(path: String) = when {
-    path.endsWith(".mp4")  -> "video/mp4"
-    path.endsWith(".webm") -> "video/webm"
-    path.endsWith(".mkv")  -> "video/x-matroska"
-    path.endsWith(".mp3")  -> "audio/mpeg"
-    path.endsWith(".m4a")  -> "audio/mp4"
-    path.endsWith(".opus") -> "audio/opus"
-    else                   -> "*/*"
-}
-
-private fun uriFor(ctx: Context, path: String) =
-    FileProvider.getUriForFile(
-        ctx, "${ctx.packageName}.provider", File(path)
-    )
-
-private fun shareFile(ctx: Context, path: String) {
-    val uri = uriFor(ctx, path)
-    ctx.startActivity(
-        Intent.createChooser(
-            Intent(Intent.ACTION_SEND).apply {
-                type = mimeOf(path)
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            },
-            "Share"
-        )
-    )
-}
-
-private fun openFile(ctx: Context, path: String) {
-    val uri = uriFor(ctx, path)
-    ctx.startActivity(
-        Intent.createChooser(
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mimeOf(path))
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            },
-            "Open with"
-        )
-    )
 }
