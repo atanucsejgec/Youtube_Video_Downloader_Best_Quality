@@ -4,4 +4,5 @@
     <external-path name="movies" path="Movies/YTDownloader/" />
     <external-path name="music" path="Music/YTDownloader/" />
     <external-path name="downloads_pub" path="Download/YTDownloader/" />
+    <external-path name="root" path="." />
 </paths>

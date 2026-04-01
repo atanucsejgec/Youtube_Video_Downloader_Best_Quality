@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +40,25 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
     val url by vm.url.collectAsStateWithLifecycle()
     val quality by vm.quality.collectAsStateWithLifecycle()
     val dlAsPlaylist by vm.downloadAsPlaylist.collectAsStateWithLifecycle()
+    val dlLocation by vm.downloadLocation.collectAsStateWithLifecycle()
+    val showSettings by vm.showSettings.collectAsStateWithLifecycle()
+
+    // ── Handle shared URL from YouTube ──
+    LaunchedEffect(Unit) {
+        val shared = MainActivity.consumeSharedUrl()
+        if (shared != null) {
+            vm.handleSharedUrl(shared)
+        }
+    }
+
+    // Also check periodically for new shares (when app is already running)
+    val sharedUrl by MainActivity.sharedUrl.collectAsStateWithLifecycle()
+    LaunchedEffect(sharedUrl) {
+        val shared = MainActivity.consumeSharedUrl()
+        if (shared != null) {
+            vm.handleSharedUrl(shared)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -46,7 +66,16 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                 title = { Text("YouTube Downloader") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+                ),
+                actions = {
+                    IconButton(onClick = { vm.toggleSettings() }) {
+                        Icon(
+                            if (showSettings) Icons.Default.Close
+                            else Icons.Default.Settings,
+                            "Settings"
+                        )
+                    }
+                }
             )
         }
     ) { padding ->
@@ -58,6 +87,14 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+
+            /* ── Settings panel ── */
+            AnimatedVisibility(visible = showSettings) {
+                SettingsCard(
+                    currentLocation = dlLocation,
+                    onLocationChange = vm::setDownloadLocation
+                )
+            }
 
             if (uiState is UiState.Initializing) {
                 BannerCard("Initializing engine…", showSpinner = true)
@@ -109,20 +146,21 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                 else -> null
             }
             if (playlistInfo != null) {
-                PlaylistCard(
-                    info = playlistInfo,
-                    downloadAsPlaylist = dlAsPlaylist,
-                    onToggle = vm::setDownloadAsPlaylist
-                )
+                PlaylistCard(playlistInfo, dlAsPlaylist, vm::setDownloadAsPlaylist)
             }
 
-            /* ── Quality selector with sizes ── */
+            /* ── Quality selector ── */
             val formatSizes = when (uiState) {
                 is UiState.InfoReady -> (uiState as UiState.InfoReady).formatSizes
                 else -> emptyMap()
             }
             if (uiState is UiState.InfoReady || uiState is UiState.Completed) {
                 QualityDropdown(quality, formatSizes, vm::selectQuality)
+            }
+
+            /* ── Save location indicator ── */
+            if (uiState is UiState.InfoReady) {
+                SaveLocationChip(dlLocation)
             }
 
             /* ── Download button ── */
@@ -134,14 +172,12 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                 ) {
                     Icon(Icons.Default.Download, null)
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        buildString {
-                            append("Download · ${quality.label}")
-                            if (!sizeLabel.isNullOrBlank()) append(" · $sizeLabel")
-                            if (dlAsPlaylist && playlistInfo != null)
-                                append(" × ${playlistInfo.count}")
-                        }
-                    )
+                    Text(buildString {
+                        append("Download · ${quality.label}")
+                        if (!sizeLabel.isNullOrBlank()) append(" · $sizeLabel")
+                        if (dlAsPlaylist && playlistInfo != null)
+                            append(" × ${playlistInfo.count}")
+                    })
                 }
             }
 
@@ -149,12 +185,8 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
             if (uiState is UiState.Downloading) {
                 val st = uiState as UiState.Downloading
                 ProgressSection(
-                    progress = st.progress,
-                    eta = st.eta,
-                    line = st.line,
-                    currentItem = st.currentItem,
-                    totalItems = st.totalItems,
-                    currentVideoTitle = st.currentVideoTitle,
+                    st.progress, st.eta, st.line,
+                    st.currentItem, st.totalItems, st.currentVideoTitle,
                     onCancel = vm::cancelDownload
                 )
             }
@@ -162,18 +194,13 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
             /* ── Completed ── */
             if (uiState is UiState.Completed) {
                 val st = uiState as UiState.Completed
-                CompletedSection(
-                    savedLocation = st.savedLocation,
-                    fileCount = st.fileCount,
-                    failedCount = st.failedCount,
-                    lastFile = st.lastFile
-                )
+                CompletedSection(st.savedLocation, st.fileCount, st.failedCount, st.lastFile)
             }
 
             /* ── Error ── */
             if (uiState is UiState.Error) {
                 ErrorSection(
-                    msg = (uiState as UiState.Error).message,
+                    (uiState as UiState.Error).message,
                     onDismiss = vm::reset,
                     onRetry = vm::initEngine
                 )
@@ -184,7 +211,88 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
     }
 }
 
-/* ═══════════════ Sub-Composables ═══════════════ */
+/* ═══════════════ Settings Card ═══════════════ */
+
+@Composable
+private fun SettingsCard(
+    currentLocation: DownloadLocation,
+    onLocationChange: (DownloadLocation) -> Unit
+) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "⚙️ Download Settings",
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall
+            )
+
+            Text(
+                "Save location:",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            DownloadLocation.entries.filter { it != DownloadLocation.CUSTOM }.forEach { loc ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp)),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = currentLocation == loc,
+                        onClick = { onLocationChange(loc) }
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "${loc.icon}  ${loc.label}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+
+            HorizontalDivider()
+
+            Text(
+                "📂 Files saved to: Internal Storage/${currentLocation.label}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+/* ═══════════════ Save Location Chip ═══════════════ */
+
+@Composable
+private fun SaveLocationChip(location: DownloadLocation) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "${location.icon} Saving to: ${location.label}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+    }
+}
+
+/* ═══════════════ Other Composables ═══════════════ */
 
 @Composable
 private fun UrlInput(url: String, onUrlChange: (String) -> Unit, enabled: Boolean) {
@@ -216,46 +324,26 @@ private fun UrlInput(url: String, onUrlChange: (String) -> Unit, enabled: Boolea
 
 @Composable
 private fun VideoInfoCard(d: VideoDetails) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp)
-    ) {
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
         Column {
             d.thumbnail?.let { thumbUrl ->
                 AsyncImage(
-                    model = thumbUrl,
-                    contentDescription = null,
+                    model = thumbUrl, contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .clip(
-                            RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
-                        )
+                    modifier = Modifier.fillMaxWidth().height(200.dp)
+                        .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
                 )
             }
-            Column(
-                Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    d.title,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(d.title, fontWeight = FontWeight.Bold, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis)
                 d.author?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (d.duration > 0) {
-                    Text(
-                        "Duration: ${formatDuration(d.duration)}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text("Duration: ${formatDuration(d.duration)}",
+                        style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -264,9 +352,7 @@ private fun VideoInfoCard(d: VideoDetails) {
 
 @Composable
 private fun PlaylistCard(
-    info: PlaylistInfo,
-    downloadAsPlaylist: Boolean,
-    onToggle: (Boolean) -> Unit
+    info: PlaylistInfo, downloadAsPlaylist: Boolean, onToggle: (Boolean) -> Unit
 ) {
     Card(
         Modifier.fillMaxWidth(),
@@ -275,60 +361,35 @@ private fun PlaylistCard(
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.PlaylistPlay, null,
+                Icon(Icons.Default.PlaylistPlay, null,
                     tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(28.dp)
-                )
+                    modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(8.dp))
                 Column {
-                    Text(
-                        "Playlist Detected",
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                    Text(
-                        "${info.title} · ${info.count} videos",
+                    Text("Playlist Detected", fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text("${info.title} · ${info.count} videos",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(
-                            alpha = 0.8f
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-
-            Row(
-                Modifier.fillMaxWidth(),
+            Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+                verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     if (downloadAsPlaylist) "Download all ${info.count} videos"
                     else "Download single video only",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-                Switch(
-                    checked = downloadAsPlaylist,
-                    onCheckedChange = onToggle
-                )
+                    color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Switch(checked = downloadAsPlaylist, onCheckedChange = onToggle)
             }
-
             if (downloadAsPlaylist) {
-                Text(
-                    "💡 Videos download one-by-one to save storage",
+                Text("💡 Videos download one-by-one to save storage",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(
-                        alpha = 0.6f
-                    )
-                )
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f))
             }
         }
     }
@@ -337,63 +398,40 @@ private fun PlaylistCard(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QualityDropdown(
-    selected: VideoQuality,
-    formatSizes: Map<VideoQuality, String>,
+    selected: VideoQuality, formatSizes: Map<VideoQuality, String>,
     onSelect: (VideoQuality) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded }
-    ) {
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
         val sizeLabel = formatSizes[selected]
         OutlinedTextField(
-            value = if (!sizeLabel.isNullOrBlank())
-                "${selected.label}  ·  $sizeLabel"
+            value = if (!sizeLabel.isNullOrBlank()) "${selected.label}  ·  $sizeLabel"
             else selected.label,
-            onValueChange = {},
-            readOnly = true,
+            onValueChange = {}, readOnly = true,
             label = { Text("Quality") },
-            trailingIcon = {
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded)
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor()
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor()
         )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             VideoQuality.entries.forEach { q ->
                 val size = formatSizes[q]
                 DropdownMenuItem(
                     text = {
-                        Row(
-                            Modifier.fillMaxWidth(),
+                        Row(Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                            verticalAlignment = Alignment.CenterVertically) {
                             Text(q.label)
                             if (!size.isNullOrBlank()) {
-                                Text(
-                                    size,
-                                    style = MaterialTheme.typography.bodySmall,
+                                Text(size, style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                    fontWeight = FontWeight.SemiBold)
                             }
                         }
                     },
                     onClick = { onSelect(q); expanded = false },
                     leadingIcon = {
-                        Icon(
-                            if (q.isAudioOnly) Icons.Default.MusicNote
-                            else Icons.Default.Videocam,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Icon(if (q.isAudioOnly) Icons.Default.MusicNote
+                        else Icons.Default.Videocam, null, Modifier.size(20.dp))
                     }
                 )
             }
@@ -403,118 +441,63 @@ private fun QualityDropdown(
 
 @Composable
 private fun ProgressSection(
-    progress: Float,
-    eta: Long,
-    line: String,
-    currentItem: Int,
-    totalItems: Int,
-    currentVideoTitle: String,
+    progress: Float, eta: Long, line: String,
+    currentItem: Int, totalItems: Int, currentVideoTitle: String,
     onCancel: () -> Unit
 ) {
-    Card(
-        Modifier.fillMaxWidth(),
+    Card(Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            /* ── Header ── */
-            Row(
-                Modifier.fillMaxWidth(),
+            containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+                verticalAlignment = Alignment.CenterVertically) {
                 Text("Downloading…", fontWeight = FontWeight.SemiBold)
                 if (totalItems > 1) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            "  $currentItem / $totalItems  ",
+                    Surface(color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(12.dp)) {
+                        Text("  $currentItem / $totalItems  ",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.padding(
-                                horizontal = 8.dp, vertical = 4.dp
-                            )
-                        )
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                     }
                 }
             }
-
-            /* ── Current video title (playlist) ── */
             if (totalItems > 1 && currentVideoTitle.isNotBlank()) {
-                Text(
-                    "🎬 $currentVideoTitle",
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Text("🎬 $currentVideoTitle", style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-
-            /* ── Progress bar ── */
             LinearProgressIndicator(
                 progress = { (progress / 100f).coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-            )
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "${progress.toInt()}%",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                if (eta > 0) Text(
-                    "ETA ${eta}s",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                modifier = Modifier.fillMaxWidth().height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("${progress.toInt()}%", style = MaterialTheme.typography.bodySmall)
+                if (eta > 0) Text("ETA ${eta}s", style = MaterialTheme.typography.bodySmall)
             }
-
-            /* ── Overall progress for playlists ── */
             if (totalItems > 1) {
-                val overallPercent = ((currentItem - 1) * 100f +
-                        progress) / totalItems
+                val overallPercent = ((currentItem - 1) * 100f + progress) / totalItems
                 LinearProgressIndicator(
                     progress = { (overallPercent / 100f).coerceIn(0f, 1f) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
+                    modifier = Modifier.fillMaxWidth().height(4.dp)
                         .clip(RoundedCornerShape(2.dp)),
                     color = MaterialTheme.colorScheme.tertiary,
-                    trackColor = MaterialTheme.colorScheme.tertiaryContainer,
-                )
-                Text(
-                    "Overall: ${overallPercent.toInt()}%",
+                    trackColor = MaterialTheme.colorScheme.tertiaryContainer)
+                Text("Overall: ${overallPercent.toInt()}%",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary
-                )
+                    color = MaterialTheme.colorScheme.tertiary)
             }
-
             if (line.isNotBlank()) {
-                Text(
-                    line,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(line, style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-
             OutlinedButton(onClick = onCancel, Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Cancel, null)
-                Spacer(Modifier.width(6.dp))
-                Text("Cancel")
+                Spacer(Modifier.width(6.dp)); Text("Cancel")
             }
         }
     }
@@ -522,95 +505,55 @@ private fun ProgressSection(
 
 @Composable
 private fun CompletedSection(
-    savedLocation: String,
-    fileCount: Int,
-    failedCount: Int,
-    lastFile: SavedFileInfo?
+    savedLocation: String, fileCount: Int,
+    failedCount: Int, lastFile: SavedFileInfo?
 ) {
     val context = LocalContext.current
-
-    Card(
-        Modifier.fillMaxWidth(),
+    Card(Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-        )
-    ) {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            /* ── Header ── */
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.CheckCircle, null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                Icon(Icons.Default.CheckCircle, null,
+                    tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    "Saved to Gallery!",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Text("Saved to Gallery!", fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium)
             }
-
-            /* ── Stats ── */
             if (fileCount > 1 || failedCount > 0) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text(
-                        "✅ $fileCount saved",
+                    Text("✅ $fileCount saved",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                        color = MaterialTheme.colorScheme.primary)
                     if (failedCount > 0) {
-                        Text(
-                            "❌ $failedCount failed",
+                        Text("❌ $failedCount failed",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.error
-                        )
+                            color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
+            Text("📁 $savedLocation", style = MaterialTheme.typography.bodySmall,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
 
-            /* ── Location ── */
-            Text(
-                "📁 $savedLocation",
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            /* ── Open & Share Buttons ── */
+            /* ── Open & Share buttons ── */
             if (lastFile != null) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // ── Open Button ──
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()) {
                     Button(
                         onClick = { openSavedFile(context, lastFile) },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(
-                            Icons.Default.PlayArrow, null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Open")
+                        Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp))
+                        Spacer(Modifier.width(6.dp)); Text("Open")
                     }
-
-                    // ── Share Button ──
                     OutlinedButton(
                         onClick = { shareSavedFile(context, lastFile) },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(
-                            Icons.Default.Share, null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Share")
+                        Icon(Icons.Default.Share, null, Modifier.size(20.dp))
+                        Spacer(Modifier.width(6.dp)); Text("Share")
                     }
                 }
             }
@@ -619,49 +562,26 @@ private fun CompletedSection(
 }
 
 @Composable
-private fun ErrorSection(
-    msg: String,
-    onDismiss: () -> Unit,
-    onRetry: () -> Unit = {}
-) {
-    Card(
-        Modifier.fillMaxWidth(),
+private fun ErrorSection(msg: String, onDismiss: () -> Unit, onRetry: () -> Unit = {}) {
+    Card(Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
-    ) {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+            containerColor = MaterialTheme.colorScheme.errorContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.Error, null,
-                    tint = MaterialTheme.colorScheme.error
-                )
+                Icon(Icons.Default.Error, null, tint = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    "Error",
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.error
-                )
+                Text("Error", fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error)
             }
-
             SelectionContainer {
-                Text(
-                    msg,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier
-                        .heightIn(max = 200.dp)
-                        .verticalScroll(rememberScrollState())
-                )
+                Text(msg, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.heightIn(max = 200.dp)
+                        .verticalScroll(rememberScrollState()))
             }
-
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onRetry) {
                     Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Retry")
+                    Spacer(Modifier.width(4.dp)); Text("Retry")
                 }
                 TextButton(onClick = onDismiss) { Text("Dismiss") }
             }
@@ -671,20 +591,12 @@ private fun ErrorSection(
 
 @Composable
 private fun BannerCard(text: String, showSpinner: Boolean = false) {
-    Card(
-        Modifier.fillMaxWidth(),
+    Card(Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Row(
-            Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+            containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             if (showSpinner) {
-                CircularProgressIndicator(
-                    Modifier.size(24.dp), strokeWidth = 2.dp
-                )
+                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(12.dp))
             }
             Text(text)
@@ -695,25 +607,15 @@ private fun BannerCard(text: String, showSpinner: Boolean = false) {
 /* ═══════════════ Helpers ═══════════════ */
 
 private fun formatDuration(seconds: Long): String {
-    val h = seconds / 3600
-    val m = (seconds % 3600) / 60
-    val s = seconds % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s)
-    else "%d:%02d".format(m, s)
+    val h = seconds / 3600; val m = (seconds % 3600) / 60; val s = seconds % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
 private fun getFileUri(context: Context, fileInfo: SavedFileInfo): Uri {
-    // Q+: Use content:// URI from MediaStore
-    if (fileInfo.contentUri != null) {
-        return Uri.parse(fileInfo.contentUri)
-    }
-    // Pre-Q: Use FileProvider with absolute path
+    if (fileInfo.contentUri != null) return Uri.parse(fileInfo.contentUri)
     if (fileInfo.absolutePath != null) {
         return FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.provider",
-            File(fileInfo.absolutePath)
-        )
+            context, "${context.packageName}.provider", File(fileInfo.absolutePath))
     }
     throw IllegalStateException("No URI available")
 }
@@ -721,34 +623,26 @@ private fun getFileUri(context: Context, fileInfo: SavedFileInfo): Uri {
 private fun openSavedFile(context: Context, fileInfo: SavedFileInfo) {
     try {
         val uri = getFileUri(context, fileInfo)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, fileInfo.mimeType)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(intent, "Open with"))
+        context.startActivity(Intent.createChooser(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, fileInfo.mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }, "Open with"))
     } catch (e: Exception) {
-        Toast.makeText(
-            context,
-            "No app found to open this file",
-            Toast.LENGTH_SHORT
-        ).show()
+        Toast.makeText(context, "No app found to open this file", Toast.LENGTH_SHORT).show()
     }
 }
 
 private fun shareSavedFile(context: Context, fileInfo: SavedFileInfo) {
     try {
         val uri = getFileUri(context, fileInfo)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = fileInfo.mimeType
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(intent, "Share via"))
+        context.startActivity(Intent.createChooser(
+            Intent(Intent.ACTION_SEND).apply {
+                type = fileInfo.mimeType
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }, "Share via"))
     } catch (e: Exception) {
-        Toast.makeText(
-            context,
-            "Failed to share file",
-            Toast.LENGTH_SHORT
-        ).show()
+        Toast.makeText(context, "Failed to share file", Toast.LENGTH_SHORT).show()
     }
 }
