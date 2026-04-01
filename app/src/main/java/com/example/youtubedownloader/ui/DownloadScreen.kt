@@ -90,9 +90,15 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
 
             /* ── Settings panel ── */
             AnimatedVisibility(visible = showSettings) {
+                val storage by vm.storageInfo.collectAsStateWithLifecycle()
+                val clearing by vm.isClearing.collectAsStateWithLifecycle()
+
                 SettingsCard(
                     currentLocation = dlLocation,
-                    onLocationChange = vm::setDownloadLocation
+                    onLocationChange = vm::setDownloadLocation,
+                    storageInfo = storage,
+                    isClearing = clearing,
+                    onClearCache = vm::clearAllCache
                 )
             }
 
@@ -216,7 +222,10 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
 @Composable
 private fun SettingsCard(
     currentLocation: DownloadLocation,
-    onLocationChange: (DownloadLocation) -> Unit
+    onLocationChange: (DownloadLocation) -> Unit,
+    storageInfo: StorageInfo,
+    isClearing: Boolean,
+    onClearCache: () -> Unit
 ) {
     Card(
         Modifier.fillMaxWidth(),
@@ -230,11 +239,12 @@ private fun SettingsCard(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "⚙️ Download Settings",
+                "⚙️ Settings",
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleSmall
             )
 
+            /* ── Download Location ── */
             Text(
                 "Save location:",
                 style = MaterialTheme.typography.bodySmall,
@@ -266,6 +276,81 @@ private fun SettingsCard(
                 "📂 Files saved to: Internal Storage/${currentLocation.label}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary
+            )
+
+            HorizontalDivider()
+
+            /* ── Cache / Storage Section ── */
+            Text(
+                "🗂️ Storage",
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall
+            )
+
+            // Cache size display
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (storageInfo.cacheSize > 50 * 1024 * 1024)
+                        MaterialTheme.colorScheme.errorContainer
+                    else MaterialTheme.colorScheme.surface
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            "App cache & temp files",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            storageInfo.cacheSizeText,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (storageInfo.cacheSize > 50 * 1024 * 1024)
+                                MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    // Clear button
+                    Button(
+                        onClick = onClearCache,
+                        enabled = !isClearing && storageInfo.cacheSize > 0,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        )
+                    ) {
+                        if (isClearing) {
+                            CircularProgressIndicator(
+                                Modifier.size(16.dp),
+                                color = MaterialTheme.colorScheme.onError,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Clearing…")
+                        } else {
+                            Icon(
+                                Icons.Default.DeleteSweep, null,
+                                Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Clear")
+                        }
+                    }
+                }
+            }
+
+            Text(
+                "💡 Cache is auto-cleaned when app opens",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
         }
     }
@@ -424,10 +509,10 @@ private fun QualityDropdown(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            // ── Video Resolutions ──
-            SectionHeader("📹 Video Quality")
+            // ── Video ──
+            SectionHeader("📹 Video")
             listOf(
-                VideoQuality.BEST_8K,
+                VideoQuality.BEST,
                 VideoQuality.UHD_4K,
                 VideoQuality.QHD_2K,
                 VideoQuality.FHD,
@@ -442,13 +527,11 @@ private fun QualityDropdown(
 
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
-            // ── Codec Specific ──
-            SectionHeader("🎯 Codec Specific")
+            // ── Smart Options ──
+            SectionHeader("🎯 Smart Options")
             listOf(
-                VideoQuality.BEST_AV1,
-                VideoQuality.BEST_H264,
-                VideoQuality.BEST_VP9,
-                VideoQuality.BEST_HDR
+                VideoQuality.SMALLEST,
+                VideoQuality.COMPATIBLE
             ).forEach { q ->
                 QualityItem(q, formatSizes[q], selected == q) {
                     onSelect(q); expanded = false
@@ -457,13 +540,12 @@ private fun QualityDropdown(
 
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
 
-            // ── Audio Only ──
+            // ── Audio ──
             SectionHeader("🎵 Audio Only")
             listOf(
                 VideoQuality.AUDIO_BEST,
-                VideoQuality.AUDIO_M4A,
                 VideoQuality.AUDIO_MP3,
-                VideoQuality.AUDIO_OPUS
+                VideoQuality.AUDIO_M4A
             ).forEach { q ->
                 QualityItem(q, formatSizes[q], selected == q) {
                     onSelect(q); expanded = false
@@ -483,6 +565,8 @@ private fun SectionHeader(title: String) {
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
     )
 }
+
+
 
 @Composable
 private fun QualityItem(

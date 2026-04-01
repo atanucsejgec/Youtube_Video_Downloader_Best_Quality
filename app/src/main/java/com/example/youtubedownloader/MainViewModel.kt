@@ -55,15 +55,20 @@ data class SavedFileInfo(
     val absolutePath: String?
 )
 
+data class StorageInfo(
+    val cacheSize: Long,
+    val cacheSizeText: String
+)
+
 enum class VideoQuality(
     val label: String,
     val formatArg: String,
     val isAudioOnly: Boolean = false
 ) {
-    // ── Video Qualities ──
-    BEST_8K(
-        "8K · Best Possible",
-        "bestvideo[height>=4320]+bestaudio/bestvideo+bestaudio/best"
+    // ── Simple Resolution Choices ──
+    BEST(
+        "Best Quality (Auto)",
+        "bestvideo+bestaudio/best"
     ),
     UHD_4K(
         "4K · 2160p",
@@ -90,45 +95,20 @@ enum class VideoQuality(
         "bestvideo[height<=360]+bestaudio/best[height<=360]"
     ),
 
-    // ── Codec-Specific (better quality or compatibility) ──
-    BEST_AV1(
-        "Best AV1 · Highest Quality",
+    // ── Smart Codec Choices ──
+    SMALLEST(
+        "Smallest File · AV1",
         "bestvideo[vcodec^=av01]+bestaudio/bestvideo+bestaudio/best"
     ),
-    BEST_H264(
-        "Best H.264 · Most Compatible",
+    COMPATIBLE(
+        "Most Compatible · H.264",
         "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/best"
-    ),
-    BEST_VP9(
-        "Best VP9",
-        "bestvideo[vcodec^=vp9]+bestaudio/bestvideo+bestaudio/best"
-    ),
-    BEST_HDR(
-        "Best HDR",
-        "bestvideo[dynamic_range=HDR]+bestaudio/bestvideo+bestaudio/best"
     ),
 
     // ── Audio Only ──
-    AUDIO_BEST(
-        "Audio · Best Quality",
-        "bestaudio/best",
-        true
-    ),
-    AUDIO_M4A(
-        "Audio · M4A (AAC)",
-        "bestaudio[ext=m4a]/bestaudio",
-        true
-    ),
-    AUDIO_MP3(
-        "Audio · MP3",
-        "bestaudio",
-        true
-    ),
-    AUDIO_OPUS(
-        "Audio · Opus (Smallest)",
-        "bestaudio[acodec=opus]/bestaudio",
-        true
-    );
+    AUDIO_BEST("Audio · Best", "bestaudio/best", true),
+    AUDIO_MP3("Audio · MP3", "bestaudio", true),
+    AUDIO_M4A("Audio · M4A", "bestaudio[ext=m4a]/bestaudio", true);
 
     val isVideo: Boolean get() = !isAudioOnly
 }
@@ -195,6 +175,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _showSettings = MutableStateFlow(false)
     val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
 
+    private val _storageInfo = MutableStateFlow(StorageInfo(0L, "0 B"))
+    val storageInfo: StateFlow<StorageInfo> = _storageInfo.asStateFlow()
+
+    private val _isClearing = MutableStateFlow(false)
+    val isClearing: StateFlow<Boolean> = _isClearing.asStateFlow()
+
     @Volatile
     private var isEngineReady = false
     private var job: Job? = null
@@ -205,10 +191,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var cachedPlaylistInfo: PlaylistInfo? = null
 
     private val tempDir: File
-        get() = File(
-            getApplication<Application>().getExternalFilesDir(null),
-            "YTDownloader_temp"
-        ).also { if (!it.exists()) it.mkdirs() }
+        get() = CacheManager.getTempDir(getApplication())
+            .also { if (!it.exists()) it.mkdirs() }
 
     private fun Throwable.fullTrace(): String {
         val sw = StringWriter(); printStackTrace(PrintWriter(sw)); return sw.toString()
@@ -217,7 +201,46 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /* ═══════════════ INIT ═══════════════ */
 
     init {
+        // ✅ AUTO-CLEANUP on every app open
+        performAutoCleanup()
         initEngine()
+    }
+
+    private fun performAutoCleanup() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "🧹 Auto-cleanup on app open...")
+                CacheManager.autoCleanup(getApplication())
+                updateStorageInfo()
+            } catch (e: Exception) {
+                Log.w(TAG, "Auto-cleanup error: ${e.message}")
+            }
+        }
+    }
+
+    fun updateStorageInfo() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val size = CacheManager.getCleanableSize(getApplication())
+            _storageInfo.value = StorageInfo(
+                cacheSize = size,
+                cacheSizeText = CacheManager.formatBytes(size)
+            )
+        }
+    }
+
+    fun clearAllCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isClearing.value = true
+            try {
+                val freed = CacheManager.deepCleanup(getApplication())
+                Log.d(TAG, "🧹 Deep cleanup freed: ${CacheManager.formatBytes(freed)}")
+                updateStorageInfo()
+            } catch (e: Exception) {
+                Log.e(TAG, "Deep cleanup error", e)
+            } finally {
+                _isClearing.value = false
+            }
+        }
     }
 
     fun initEngine() {
@@ -239,7 +262,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     Log.w(TAG, "Update skipped: ${e.message}")
                 }
 
-                cleanTempDir()
+                updateStorageInfo()
                 _uiState.value = UiState.Idle
             } catch (e: Exception) {
                 Log.e(TAG, "Init failed", e)
@@ -253,7 +276,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun updateUrl(v: String) { _url.value = v }
     fun selectQuality(q: VideoQuality) { _quality.value = q }
     fun setDownloadAsPlaylist(v: Boolean) { _downloadAsPlaylist.value = v }
-    fun toggleSettings() { _showSettings.value = !_showSettings.value }
+    fun toggleSettings() {
+        _showSettings.value = !_showSettings.value
+        if (_showSettings.value) updateStorageInfo()
+    }
 
     fun setDownloadLocation(location: DownloadLocation) {
         _downloadLocation.value = location
@@ -262,7 +288,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun handleSharedUrl(url: String) {
         _url.value = url
-        // Auto-fetch if engine is ready
         if (isEngineReady && _uiState.value is UiState.Idle) {
             fetchInfo()
         }
@@ -383,6 +408,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 downloadSingleAndSave(videoUrl, details, q)
             }
+
+            // ✅ Auto-cleanup after every download
+            try {
+                CacheManager.autoCleanup(getApplication())
+                updateStorageInfo()
+            } catch (_: Exception) {}
         }
     }
 
@@ -393,6 +424,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         job?.cancel()
         cleanTempDir()
         _uiState.value = UiState.Idle
+
+        // Cleanup after cancel too
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                CacheManager.autoCleanup(getApplication())
+                updateStorageInfo()
+            } catch (_: Exception) {}
+        }
     }
 
     fun reset() {
@@ -423,10 +462,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val videoNum = index + 1
 
             _uiState.value = UiState.Downloading(
-                details = details,
-                progress = 0f,
-                currentItem = videoNum,
-                totalItems = total,
+                details = details, progress = 0f,
+                currentItem = videoNum, totalItems = total,
                 currentVideoTitle = entry.title
             )
 
@@ -445,14 +482,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     addOption("--no-mtime")
                     addOption("--no-cache-dir")
 
-                    if (q.isAudioOnly && q == VideoQuality.AUDIO_MP3) {
+                    if (q == VideoQuality.AUDIO_MP3) {
                         addOption("-x")
                         addOption("--audio-format", "mp3")
-                    } else if (q.isAudioOnly && q == VideoQuality.AUDIO_OPUS) {
-                        addOption("-x")
-                        addOption("--audio-format", "opus")
                     } else if (q.isAudioOnly) {
-                        // M4A or best audio — no conversion
+                        // Best/M4A — keep original format
                     } else {
                         addOption("--merge-output-format", "mp4")
                     }
@@ -482,7 +516,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 cleanTempDir(); throw e
             } catch (e: Exception) {
                 failedCount++
-                Log.e(TAG, "Failed video $videoNum: ${e.message}")
+                Log.e(TAG, "Failed video ${index + 1}: ${e.message}")
             }
             cleanTempDir()
         }
@@ -512,14 +546,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 addOption("--no-mtime")
                 addOption("--no-cache-dir")
 
-                if (q.isAudioOnly && q == VideoQuality.AUDIO_MP3) {
+                if (q == VideoQuality.AUDIO_MP3) {
                     addOption("-x")
                     addOption("--audio-format", "mp3")
-                } else if (q.isAudioOnly && q == VideoQuality.AUDIO_OPUS) {
-                    addOption("-x")
-                    addOption("--audio-format", "opus")
                 } else if (q.isAudioOnly) {
-                    // M4A or best audio — no conversion needed
+                    // Best/M4A — keep original format
                 } else {
                     addOption("--merge-output-format", "mp4")
                 }
@@ -574,35 +605,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val resolver = context.contentResolver
         val isVideo = mime.startsWith("video")
         val isAudio = mime.startsWith("audio")
-
-        // ── Use user's chosen download location ──
         val location = _downloadLocation.value
         val subfolder = DownloadPrefs.getSubfolderName(context)
 
         val (collection, relativePath) = when {
-            location == DownloadLocation.CUSTOM -> {
-                // For custom, still use MediaStore but with Downloads
+            location == DownloadLocation.CUSTOM ->
                 MediaStore.Downloads.getContentUri(
                     MediaStore.VOLUME_EXTERNAL_PRIMARY
                 ) to "${Environment.DIRECTORY_DOWNLOADS}/$subfolder"
-            }
-            isAudio || location == DownloadLocation.MUSIC -> {
+
+            isAudio || location == DownloadLocation.MUSIC ->
                 MediaStore.Audio.Media.getContentUri(
                     MediaStore.VOLUME_EXTERNAL_PRIMARY
                 ) to "${Environment.DIRECTORY_MUSIC}/$subfolder"
-            }
-            location == DownloadLocation.DCIM -> {
+
+            location == DownloadLocation.DCIM ->
                 MediaStore.Video.Media.getContentUri(
                     MediaStore.VOLUME_EXTERNAL_PRIMARY
                 ) to "${Environment.DIRECTORY_DCIM}/$subfolder"
-            }
-            location == DownloadLocation.DOWNLOADS -> {
+
+            location == DownloadLocation.DOWNLOADS ->
                 MediaStore.Downloads.getContentUri(
                     MediaStore.VOLUME_EXTERNAL_PRIMARY
                 ) to "${Environment.DIRECTORY_DOWNLOADS}/$subfolder"
-            }
+
             else -> {
-                // MOVIES (default)
                 if (isVideo) {
                     MediaStore.Video.Media.getContentUri(
                         MediaStore.VOLUME_EXTERNAL_PRIMARY
@@ -682,7 +709,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val durationSec = json.optDouble("duration", 0.0).toLong()
 
         data class Fmt(val height: Int, val size: Long, val codec: String)
-
         val videoFormats = mutableListOf<Fmt>()
         var bestAudioSize = 0L
 
@@ -709,9 +735,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 bestAudioSize = filesize
         }
 
-        // ── Resolution-based qualities ──
+        // ── Resolution-based ──
         val targets = mapOf(
-            VideoQuality.BEST_8K to 9999,
             VideoQuality.UHD_4K to 2160,
             VideoQuality.QHD_2K to 1440,
             VideoQuality.FHD to 1080,
@@ -721,24 +746,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
 
         for ((quality, targetH) in targets) {
-            val vf = if (quality == VideoQuality.BEST_8K) {
-                videoFormats.maxByOrNull { it.height }
-            } else {
-                videoFormats.filter { it.height in 1..targetH }
-                    .maxByOrNull { it.height }
-            }
+            val vf = videoFormats.filter { it.height in 1..targetH }
+                .maxByOrNull { it.height }
             if (vf != null) {
                 val total = vf.size + bestAudioSize
                 if (total > 0) result[quality] = formatBytes(total)
             }
         }
 
-        // ── Codec-specific qualities ──
+        // Best = actual best available
+        val bestVideo = videoFormats.maxByOrNull { it.height }
+        if (bestVideo != null) {
+            val total = bestVideo.size + bestAudioSize
+            if (total > 0) result[VideoQuality.BEST] =
+                "${formatBytes(total)} · ${bestVideo.height}p"
+        }
+
+        // ── Codec-specific ──
         val av1 = videoFormats.filter { it.codec.startsWith("av01") }
             .maxByOrNull { it.height }
         if (av1 != null) {
             val total = av1.size + bestAudioSize
-            if (total > 0) result[VideoQuality.BEST_AV1] =
+            if (total > 0) result[VideoQuality.SMALLEST] =
                 "${formatBytes(total)} · ${av1.height}p"
         }
 
@@ -746,31 +775,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .maxByOrNull { it.height }
         if (h264 != null) {
             val total = h264.size + bestAudioSize
-            if (total > 0) result[VideoQuality.BEST_H264] =
+            if (total > 0) result[VideoQuality.COMPATIBLE] =
                 "${formatBytes(total)} · ${h264.height}p"
         }
 
-        val vp9 = videoFormats.filter { it.codec.startsWith("vp9") || it.codec.startsWith("vp09") }
-            .maxByOrNull { it.height }
-        if (vp9 != null) {
-            val total = vp9.size + bestAudioSize
-            if (total > 0) result[VideoQuality.BEST_VP9] =
-                "${formatBytes(total)} · ${vp9.height}p"
-        }
-
-        // HDR — estimate same as best
-        val bestVideo = videoFormats.maxByOrNull { it.height }
-        if (bestVideo != null) {
-            val total = bestVideo.size + bestAudioSize
-            if (total > 0) result[VideoQuality.BEST_HDR] = formatBytes(total)
-        }
-
-        // ── Audio qualities ──
+        // ── Audio ──
         if (bestAudioSize > 0) {
             result[VideoQuality.AUDIO_BEST] = formatBytes(bestAudioSize)
             result[VideoQuality.AUDIO_M4A] = formatBytes(bestAudioSize)
             result[VideoQuality.AUDIO_MP3] = formatBytes(bestAudioSize)
-            result[VideoQuality.AUDIO_OPUS] = formatBytes((bestAudioSize * 0.7).toLong())
         }
 
         return result
