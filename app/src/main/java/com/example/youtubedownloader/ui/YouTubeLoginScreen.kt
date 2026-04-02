@@ -115,9 +115,10 @@ fun YouTubeLoginSheet(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
+                    val webView = this
                     CookieManager.getInstance().apply {
                         setAcceptCookie(true)
-                        setAcceptThirdPartyCookies(this@apply as WebView?, true)
+                        setAcceptThirdPartyCookies(webView, true)
                     }
                     settings.apply {
                         javaScriptEnabled = true

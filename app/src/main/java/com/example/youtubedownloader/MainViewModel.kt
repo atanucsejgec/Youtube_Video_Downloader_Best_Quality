@@ -71,8 +71,8 @@ enum class VideoQuality(
         "bestvideo+bestaudio/best"
     ),
     MAX_QUALITY(
-        "Max Quality · Largest Size",
-        "bestvideo*+bestaudio*/best*"
+        "Max Bitrate · Largest Size",
+        "bestvideo+bestaudio/best"
     ),
     UHD_4K(
         "4K · 2160p",
@@ -165,7 +165,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _url = MutableStateFlow("")
     val url: StateFlow<String> = _url.asStateFlow()
 
-    private val _quality = MutableStateFlow(VideoQuality.HD)
+    private val _quality = MutableStateFlow(VideoQuality.BEST)
     val quality: StateFlow<VideoQuality> = _quality.asStateFlow()
 
     private val _downloadAsPlaylist = MutableStateFlow(false)
@@ -520,15 +520,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     addOption("--no-cache-dir")
                     addCookieOptions()
 
-                    if (q == VideoQuality.MAX_QUALITY) {
-                        addOption("-S", "quality,res,br")
-                    }
-
                     if (q == VideoQuality.AUDIO_MP3) {
                         addOption("-x")
                         addOption("--audio-format", "mp3")
                     } else if (q.isAudioOnly) {
                         // Best/M4A — keep original format
+                    } else if (q == VideoQuality.MAX_QUALITY) {
+                        addOption("-S", "quality,res,br")         // ← largest video
+                        addOption("--merge-output-format", "mkv") // ← MKV container
                     } else {
                         addOption("--merge-output-format", "mp4")
                     }
@@ -589,15 +588,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 addOption("--no-cache-dir")
                 addCookieOptions()
 
-                if (q == VideoQuality.MAX_QUALITY) {
-                    addOption("-S", "quality,res,br")
-                }
-
                 if (q == VideoQuality.AUDIO_MP3) {
                     addOption("-x")
                     addOption("--audio-format", "mp3")
                 } else if (q.isAudioOnly) {
                     // Best/M4A — keep original format
+                } else if (q == VideoQuality.MAX_QUALITY) {
+                    addOption("-S", "quality,res,br")         // ← KEEP: picks largest video
+                    addOption("--merge-output-format", "mkv") // ← FIX: MKV holds any codec
                 } else {
                     addOption("--merge-output-format", "mp4")
                 }
@@ -863,7 +861,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun cleanTempDir() {
-        try { tempDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
+        try { tempDir.listFiles()?.forEach { it.deleteRecursively() } } catch (_: Exception) {}
     }
 
     private fun mimeOf(name: String) = when {
