@@ -70,6 +70,10 @@ enum class VideoQuality(
         "Best Quality (Auto)",
         "bestvideo+bestaudio/best"
     ),
+    MAX_QUALITY(
+        "Max Quality · Largest Size",
+        "bestvideo*+bestaudio*/best*"
+    ),
     UHD_4K(
         "4K · 2160p",
         "bestvideo[height<=2160]+bestaudio/best[height<=2160]"
@@ -181,6 +185,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _isClearing = MutableStateFlow(false)
     val isClearing: StateFlow<Boolean> = _isClearing.asStateFlow()
 
+    private val _hasCookies = MutableStateFlow(false)
+    val hasCookies: StateFlow<Boolean> = _hasCookies.asStateFlow()
+
+    private val _showLogin = MutableStateFlow(false)
+    val showLogin: StateFlow<Boolean> = _showLogin.asStateFlow()
+
     @Volatile
     private var isEngineReady = false
     private var job: Job? = null
@@ -204,6 +214,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // ✅ AUTO-CLEANUP on every app open
         performAutoCleanup()
         initEngine()
+        checkCookieStatus()
     }
 
     private fun performAutoCleanup() {
@@ -273,6 +284,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ═══════════════ PUBLIC ACTIONS ═══════════════ */
 
+    fun showLoginScreen() { _showLogin.value = true }
+    fun hideLoginScreen() { _showLogin.value = false }
+
+    fun onLoginComplete() {
+        _showLogin.value = false
+        _hasCookies.value = CookieHelper.hasCookies(getApplication())
+    }
+
+    fun clearLoginCookies() {
+        CookieHelper.clearCookies(getApplication())
+        _hasCookies.value = false
+    }
+
+    fun checkCookieStatus() {
+        _hasCookies.value = CookieHelper.hasCookies(getApplication())
+    }
+
     fun updateUrl(v: String) { _url.value = v }
     fun selectQuality(q: VideoQuality) { _quality.value = q }
     fun setDownloadAsPlaylist(v: Boolean) { _downloadAsPlaylist.value = v }
@@ -311,6 +339,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     addOption("--flat-playlist")
                     addOption("--no-warnings")
                     addOption("--force-ipv4")
+                    addCookieOptions()
                 }
                 val result = YoutubeDL.getInstance().execute(request)
                 val json = parseJson(result.out)
@@ -349,6 +378,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                 addOption("--no-playlist")
                                 addOption("--no-warnings")
                                 addOption("--force-ipv4")
+                                addCookieOptions()
                             }
                             val vResult = YoutubeDL.getInstance().execute(vReq)
                             videoJson = parseJson(vResult.out)
@@ -417,6 +447,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun YoutubeDLRequest.addCookieOptions() {
+        val cookieFile = CookieHelper.getCookieFile(getApplication())
+        if (cookieFile.exists() && cookieFile.length() > 100) {
+            addOption("--cookies", cookieFile.absolutePath)
+        }
+    }
+
     fun cancelDownload() {
         processId?.let {
             try { YoutubeDL.getInstance().destroyProcessById(it) } catch (_: Exception) {}
@@ -481,6 +518,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     addOption("--restrict-filenames")
                     addOption("--no-mtime")
                     addOption("--no-cache-dir")
+                    addCookieOptions()
+
+                    if (q == VideoQuality.MAX_QUALITY) {
+                        addOption("-S", "quality,res,br")
+                    }
 
                     if (q == VideoQuality.AUDIO_MP3) {
                         addOption("-x")
@@ -545,6 +587,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 addOption("--restrict-filenames")
                 addOption("--no-mtime")
                 addOption("--no-cache-dir")
+                addCookieOptions()
+
+                if (q == VideoQuality.MAX_QUALITY) {
+                    addOption("-S", "quality,res,br")
+                }
 
                 if (q == VideoQuality.AUDIO_MP3) {
                     addOption("-x")
@@ -760,6 +807,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val total = bestVideo.size + bestAudioSize
             if (total > 0) result[VideoQuality.BEST] =
                 "${formatBytes(total)} · ${bestVideo.height}p"
+        }
+
+        // ✅ ADD THIS BLOCK — MAX_QUALITY = largest video + largest audio
+        val maxVideo = videoFormats.maxByOrNull { it.size }
+        if (maxVideo != null) {
+            val total = maxVideo.size + bestAudioSize
+            if (total > 0) result[VideoQuality.MAX_QUALITY] =
+                "${formatBytes(total)} · ${maxVideo.height}p"
         }
 
         // ── Codec-specific ──

@@ -37,7 +37,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,7 +50,6 @@ import com.example.youtubedownloader.ui.theme.*
 import java.io.File
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
-
 
 
 /* ═══════════════════════════════════════════════════════════
@@ -69,7 +67,8 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
     val dlLocation by vm.downloadLocation.collectAsStateWithLifecycle()
     val showSettings by vm.showSettings.collectAsStateWithLifecycle()
     val keyboardController = LocalSoftwareKeyboardController.current
-
+    val hasCookies by vm.hasCookies.collectAsStateWithLifecycle()
+    val showLogin by vm.showLogin.collectAsStateWithLifecycle()
 
     // ── Handle shared URL from YouTube ──
     LaunchedEffect(Unit) {
@@ -81,6 +80,14 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
     LaunchedEffect(sharedUrl) {
         val shared = MainActivity.consumeSharedUrl()
         if (shared != null) vm.handleSharedUrl(shared)
+    }
+
+    if (showLogin) {
+        YouTubeLoginSheet(
+            onDismiss = { vm.hideLoginScreen() },
+            onLoggedIn = { vm.onLoginComplete() }
+        )
+        return
     }
 
     // ── Gradient background ──
@@ -144,7 +151,11 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                     val storage by vm.storageInfo.collectAsStateWithLifecycle()
                     val clearing by vm.isClearing.collectAsStateWithLifecycle()
                     SettingsPanel(dlLocation, vm::setDownloadLocation,
-                        storage, clearing, vm::clearAllCache)
+                        storage, clearing, vm::clearAllCache,
+                                hasCookies,                          // ✅ ADD
+                        onLogin = { vm.showLoginScreen() },  // ✅ ADD
+                        onLogout = { vm.clearLoginCookies() } // ✅ ADD
+                    )
                 }
 
                 /* ── Initializing ── */
@@ -712,7 +723,9 @@ private fun QualitySelector(
                 // Video Section
                 QualitySectionHeader("📹 Video")
                 VideoQuality.entries.filter { it.isVideo && !it.name.startsWith("BEST_") &&
-                        it != VideoQuality.SMALLEST && it != VideoQuality.COMPATIBLE }.forEach { q ->
+                        it != VideoQuality.SMALLEST && it != VideoQuality.COMPATIBLE
+                        && it != VideoQuality.MAX_QUALITY  // ✅ ADD this exclusion
+                }.forEach { q ->
                     QualityMenuItem(q, formatSizes[q], selected == q) {
                         onSelect(q); expanded = false
                     }
@@ -723,6 +736,7 @@ private fun QualitySelector(
                 // Smart Section
                 QualitySectionHeader("🎯 Smart")
                 listOfNotNull(
+                    VideoQuality.entries.find { it.name == "MAX_QUALITY" },
                     VideoQuality.entries.find { it.name == "SMALLEST" },
                     VideoQuality.entries.find { it.name == "COMPATIBLE" }
                 ).forEach { q ->
@@ -1096,7 +1110,10 @@ private fun SettingsPanel(
     onLocationChange: (DownloadLocation) -> Unit,
     storageInfo: StorageInfo,
     isClearing: Boolean,
-    onClearCache: () -> Unit
+    onClearCache: () -> Unit,
+    hasCookies: Boolean,
+    onLogin: () -> Unit,
+    onLogout: () -> Unit
 ) {
     GlowCard(borderColor = CyanDark.copy(alpha = 0.3f)) {
         Column(
@@ -1187,6 +1204,76 @@ private fun SettingsPanel(
                     }
                 }
             }
+
+            HorizontalDivider(color = CardBorder)
+
+// YouTube Login
+            Text("YouTube Login", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+            Text(
+                "Sign in to fix bot detection errors on some networks",
+                color = TextDark,
+                fontSize = 11.sp
+            )
+
+            Surface(
+                color = if (hasCookies) SuccessSurface else CardLight.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (hasCookies) Icons.Default.CheckCircle
+                            else Icons.Default.AccountCircle,
+                            null,
+                            tint = if (hasCookies) SuccessGreen else TextMuted,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                if (hasCookies) "Signed in" else "Not signed in",
+                                color = if (hasCookies) SuccessGreen else TextLight,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                if (hasCookies) "Bot detection bypassed"
+                                else "May get errors on some networks",
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    if (hasCookies) {
+                        TextButton(onClick = onLogout) {
+                            Text("Logout", color = ErrorRed, fontSize = 12.sp)
+                        }
+                    } else {
+                        Button(
+                            onClick = onLogin,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = CyanPrimary,
+                                contentColor = DarkNavy
+                            ),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Login, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Sign in", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
             val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
             Row(
