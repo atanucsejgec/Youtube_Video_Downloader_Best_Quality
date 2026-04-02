@@ -97,7 +97,7 @@ enum class VideoQuality(
 
     // ── Smart Codec Choices ──
     SMALLEST(
-        "Smallest File · AV1",
+        "High Quality · Low Size · AV1",
         "bestvideo[vcodec^=av01]+bestaudio/bestvideo+bestaudio/best"
     ),
     COMPATIBLE(
@@ -252,7 +252,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 YoutubeDL.getInstance().init(getApplication())
                 FFmpeg.getInstance().init(getApplication())
                 isEngineReady = true
-                Log.d(TAG, "✅ Engine ready")
+                Log.d(TAG, "✅ App ready")
 
                 try {
                     YoutubeDL.getInstance()

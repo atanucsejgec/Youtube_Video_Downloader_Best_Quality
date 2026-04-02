@@ -30,11 +30,11 @@ object DownloadPrefs {
 
     fun getLocation(context: Context): DownloadLocation {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val name = prefs.getString(KEY_LOCATION, DownloadLocation.MOVIES.name)
+        val name = prefs.getString(KEY_LOCATION, DownloadLocation.DOWNLOADS.name)
         return try {
             DownloadLocation.valueOf(name!!)
         } catch (_: Exception) {
-            DownloadLocation.MOVIES
+            DownloadLocation.DOWNLOADS
         }
     }
 
