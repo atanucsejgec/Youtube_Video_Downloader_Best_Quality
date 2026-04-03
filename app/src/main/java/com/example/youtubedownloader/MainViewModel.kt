@@ -520,14 +520,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     addOption("--no-cache-dir")
                     addCookieOptions()
 
+                    // ── SPEED BOOST ──
+                    addOption("--concurrent-fragments", "16")
+                    addOption("--buffer-size", "64K")
+                    addOption("--no-part")
+                    addOption("--no-check-certificates")
+                    addOption("--extractor-retries", "3")
+                    addOption("--retry-sleep", "linear=1::2")
+                    addOption("--throttled-rate", "100K")
+
+                    // ── FORMAT/CONTAINER (existing logic) ──
                     if (q == VideoQuality.AUDIO_MP3) {
                         addOption("-x")
                         addOption("--audio-format", "mp3")
                     } else if (q.isAudioOnly) {
-                        // Best/M4A — keep original format
+                        // keep original format
                     } else if (q == VideoQuality.MAX_QUALITY) {
-                        addOption("-S", "quality,res,br")         // ← largest video
-                        addOption("--merge-output-format", "mkv") // ← MKV container
+                        addOption("-S", "quality,res,br")
+                        addOption("--merge-output-format", "mkv")
                     } else {
                         addOption("--merge-output-format", "mp4")
                     }
@@ -588,14 +598,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 addOption("--no-cache-dir")
                 addCookieOptions()
 
+                // ── SPEED BOOST ──
+                addOption("--concurrent-fragments", "16")
+                addOption("--buffer-size", "64K")
+                addOption("--no-part")
+                addOption("--no-check-certificates")
+                addOption("--extractor-retries", "3")
+                addOption("--retry-sleep", "linear=1::2")
+                addOption("--throttled-rate", "100K")
+
+                // ── FORMAT/CONTAINER (existing logic) ──
                 if (q == VideoQuality.AUDIO_MP3) {
                     addOption("-x")
                     addOption("--audio-format", "mp3")
                 } else if (q.isAudioOnly) {
-                    // Best/M4A — keep original format
+                    // keep original format
                 } else if (q == VideoQuality.MAX_QUALITY) {
-                    addOption("-S", "quality,res,br")         // ← KEEP: picks largest video
-                    addOption("--merge-output-format", "mkv") // ← FIX: MKV holds any codec
+                    addOption("-S", "quality,res,br")
+                    addOption("--merge-output-format", "mkv")
                 } else {
                     addOption("--merge-output-format", "mp4")
                 }
