@@ -4,24 +4,15 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -37,7 +28,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,21 +38,55 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import com.example.youtubedownloader.*
-import com.example.youtubedownloader.ui.theme.*
+import com.example.youtubedownloader.DownloadLocation
+import com.example.youtubedownloader.MainActivity
+import com.example.youtubedownloader.MainViewModel
+import com.example.youtubedownloader.PlaylistInfo
+import com.example.youtubedownloader.SavedFileInfo
+import com.example.youtubedownloader.StorageInfo
+import com.example.youtubedownloader.UiState
+import com.example.youtubedownloader.VideoDetails
+import com.example.youtubedownloader.VideoQuality
 import java.io.File
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.input.ImeAction
 
+/* ═══════════════════════════════════════════════════════
+ *  COLOR PALETTE — Refined
+ * ═══════════════════════════════════════════════════════ */
+val DarkNavy = Color(0xFF0A0E1A)
+val DarkBlue = Color(0xFF0F1629)
+val MediumBlue = Color(0xFF141D35)
+val LightNavy = Color(0xFF1A2342)
 
-/* ═══════════════════════════════════════════════════════════
- *                     ROOT SCREEN
- * ═══════════════════════════════════════════════════════════ */
+val CyanPrimary = Color(0xFF00E5FF)
+val CyanLight = Color(0xFF80F0FF)
+val CyanDark = Color(0xFF0097A7)
+val CyanMuted = Color(0xFF5CC8D4)
+val CyanSurface = Color(0xFF0D2F35)
 
+val CardDark = Color(0xFF111827)
+val CardLight = Color(0xFF1E293B)
+val CardBorder = Color(0xFF2A3550)
+
+val TextWhite = Color(0xFFF0F4FF)
+val TextLight = Color(0xFFCBD5E8)
+val TextMuted = Color(0xFF8899B4)
+val TextDark = Color(0xFF4B5C78)
+
+val SuccessGreen = Color(0xFF4ADE80)
+val SuccessSurface = Color(0xFF0A2E1A)
+
+val ErrorRed = Color(0xFFFF6B6B)
+val ErrorSurface = Color(0xFF2E0A0A)
+
+val ProgressTrack = Color(0xFF1E2A40)
+val ProgressTeal = Color(0xFF2DD4BF)
+
+/* ═══════════════════════════════════════════════════════
+ *  ROOT SCREEN
+ * ═══════════════════════════════════════════════════════ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadScreen(vm: MainViewModel = viewModel()) {
-
     val uiState by vm.uiState.collectAsStateWithLifecycle()
     val url by vm.url.collectAsStateWithLifecycle()
     val quality by vm.quality.collectAsStateWithLifecycle()
@@ -70,7 +97,7 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
     val hasCookies by vm.hasCookies.collectAsStateWithLifecycle()
     val showLogin by vm.showLogin.collectAsStateWithLifecycle()
 
-    // ── Handle shared URL from YouTube ──
+    // Handle shared URL from YouTube
     LaunchedEffect(Unit) {
         val shared = MainActivity.consumeSharedUrl()
         if (shared != null) vm.handleSharedUrl(shared)
@@ -90,7 +117,7 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
         return
     }
 
-    // ── Gradient background ──
+    // Gradient background
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -109,23 +136,41 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 48.dp, start = 20.dp, end = 12.dp, bottom = 8.dp)
+                        .padding(top = 48.dp, start = 20.dp, end = 12.dp, bottom = 12.dp)
                 ) {
-                    Text(
-                        "Youtube Downloader",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = CyanPrimary,
-                        modifier = Modifier.align(Alignment.CenterStart)
-                    )
-                    IconButton(
+                    Column(modifier = Modifier.align(Alignment.CenterStart)) {
+                        Text(
+                            "Youtube Downloader",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            color = CyanPrimary,
+                            letterSpacing = (-0.3).sp
+                        )
+                        Text(
+                            "Download videos in any quality",
+                            fontSize = 12.sp,
+                            color = TextDark,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.2.sp
+                        )
+                    }
+                    Surface(
                         onClick = { vm.toggleSettings() },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (showSettings) CyanSurface else Color.Transparent,
+                        border = BorderStroke(
+                            1.dp,
+                            if (showSettings) CyanDark.copy(alpha = 0.4f)
+                            else CardBorder
+                        ),
                         modifier = Modifier.align(Alignment.CenterEnd)
                     ) {
                         Icon(
                             if (showSettings) Icons.Filled.Close
                             else Icons.Outlined.Settings,
                             "Settings",
-                            tint = TextLight
+                            tint = if (showSettings) CyanPrimary else TextLight,
+                            modifier = Modifier.padding(10.dp).size(20.dp)
                         )
                     }
                 }
@@ -135,52 +180,60 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(horizontal = 16.dp)
+                    .padding(horizontal = 20.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-
                 Spacer(Modifier.height(4.dp))
 
-                /* ── Settings ── */
+                // Settings
                 AnimatedVisibility(
                     visible = showSettings,
-                    enter = fadeIn() + slideInVertically(),
-                    exit = fadeOut() + slideOutVertically()
+                    enter = fadeIn(tween(300)) + slideInVertically(tween(400)),
+                    exit = fadeOut(tween(200)) + slideOutVertically(tween(300))
                 ) {
                     val storage by vm.storageInfo.collectAsStateWithLifecycle()
                     val clearing by vm.isClearing.collectAsStateWithLifecycle()
-                    SettingsPanel(dlLocation, vm::setDownloadLocation,
+                    SettingsPanel(
+                        dlLocation, vm::setDownloadLocation,
                         storage, clearing, vm::clearAllCache,
-                                hasCookies,                          // ✅ ADD
-                        onLogin = { vm.showLoginScreen() },  // ✅ ADD
-                        onLogout = { vm.clearLoginCookies() } // ✅ ADD
+                        hasCookies,
+                        onLogin = { vm.showLoginScreen() },
+                        onLogout = { vm.clearLoginCookies() }
                     )
                 }
 
-                /* ── Initializing ── */
+                // Initializing
                 if (uiState is UiState.Initializing) {
                     GlowCard {
                         Row(
-                            Modifier.padding(16.dp),
+                            Modifier.padding(18.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             CircularProgressIndicator(
                                 Modifier.size(22.dp),
                                 color = CyanPrimary,
-                                strokeWidth = 2.dp
+                                strokeWidth = 2.5.dp
                             )
-                            Spacer(Modifier.width(14.dp))
-                            Text(
-                                "Starting The App…",
-                                color = CyanLight,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                            Spacer(Modifier.width(16.dp))
+                            Column {
+                                Text(
+                                    "Starting Engine…",
+                                    color = CyanLight,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "Preparing download engine",
+                                    color = TextDark,
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }
 
-                /* ── URL Input ── */
+                // URL Input
                 UrlInputField(
                     url = url,
                     onUrlChange = vm::updateUrl,
@@ -188,7 +241,7 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                             && uiState !is UiState.Downloading
                 )
 
-                /* ── Fetch Button ── */
+                // Fetch Button
                 CyanButton(
                     text = if (uiState is UiState.FetchingInfo) "Searching…"
                     else "Search Video",
@@ -201,10 +254,11 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                     filled = false,
                     onClick = {
                         keyboardController?.hide()
-                        vm.fetchInfo() }
+                        vm.fetchInfo()
+                    }
                 )
 
-                /* ── Video Info ── */
+                // Video Info
                 val details = when (uiState) {
                     is UiState.InfoReady -> (uiState as UiState.InfoReady).details
                     is UiState.Downloading -> (uiState as UiState.Downloading).details
@@ -214,12 +268,12 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
 
                 AnimatedVisibility(
                     visible = details != null,
-                    enter = fadeIn() + slideInVertically { it / 3 }
+                    enter = fadeIn(tween(400)) + slideInVertically(tween(500)) { it / 3 }
                 ) {
                     if (details != null) VideoCard(details)
                 }
 
-                /* ── Playlist Info ── */
+                // Playlist Info
                 val playlistInfo = when (uiState) {
                     is UiState.InfoReady -> (uiState as UiState.InfoReady).playlistInfo
                     else -> null
@@ -228,7 +282,7 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                     PlaylistCard(playlistInfo, dlAsPlaylist, vm::setDownloadAsPlaylist)
                 }
 
-                /* ── Quality Selector ── */
+                // Quality Selector
                 val formatSizes = when (uiState) {
                     is UiState.InfoReady -> (uiState as UiState.InfoReady).formatSizes
                     else -> emptyMap()
@@ -237,17 +291,17 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                     QualitySelector(quality, formatSizes, vm::selectQuality)
                 }
 
-                /* ── Download Location Chip ── */
+                // Download Location Chip
                 if (uiState is UiState.InfoReady) {
                     LocationChip(dlLocation)
                 }
 
-                /* ── Download Button ── */
+                // Download Button
                 if (uiState is UiState.InfoReady || uiState is UiState.Completed) {
                     val sizeLabel = formatSizes[quality]
                     CyanButton(
                         text = buildString {
-                            append("DOWNLOAD STREAM")
+                            append("DOWNLOAD")
                             if (dlAsPlaylist && playlistInfo != null)
                                 append(" × ${playlistInfo.count}")
                         },
@@ -261,7 +315,7 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                     )
                 }
 
-                /* ── Progress ── */
+                // Progress
                 if (uiState is UiState.Downloading) {
                     val st = uiState as UiState.Downloading
                     DownloadProgress(
@@ -271,13 +325,13 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
                     )
                 }
 
-                /* ── Completed ── */
+                // Completed
                 if (uiState is UiState.Completed) {
                     val st = uiState as UiState.Completed
                     CompletedCard(st.savedLocation, st.fileCount, st.failedCount, st.lastFile)
                 }
 
-                /* ── Error ── */
+                // Error
                 if (uiState is UiState.Error) {
                     ErrorCard(
                         (uiState as UiState.Error).message,
@@ -292,10 +346,9 @@ fun DownloadScreen(vm: MainViewModel = viewModel()) {
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     GLOW CARD
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  GLOW CARD
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun GlowCard(
     borderColor: Color = CardBorder,
@@ -304,20 +357,19 @@ private fun GlowCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, borderColor, RoundedCornerShape(16.dp)),
-        shape = RoundedCornerShape(16.dp),
+            .border(1.dp, borderColor, RoundedCornerShape(18.dp)),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = CardDark.copy(alpha = 0.85f)
+            containerColor = CardDark.copy(alpha = 0.88f)
         ),
     ) {
         content()
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     URL INPUT
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  URL INPUT
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun UrlInputField(
     url: String,
@@ -327,6 +379,7 @@ private fun UrlInputField(
 ) {
     val clipboard = LocalClipboardManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+
     GlowCard {
         Row(
             Modifier
@@ -334,13 +387,19 @@ private fun UrlInputField(
                 .padding(horizontal = 14.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Icon(
+                Icons.Outlined.Link, null,
+                tint = if (url.isNotBlank()) CyanPrimary else TextDark,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(8.dp))
 
             TextField(
                 value = url,
                 onValueChange = onUrlChange,
                 placeholder = {
                     Text(
-                        "https://youtube.com/watch?v=…",
+                        "Paste YouTube URL here…",
                         color = TextDark,
                         fontSize = 14.sp
                     )
@@ -350,12 +409,11 @@ private fun UrlInputField(
                 keyboardOptions = KeyboardOptions(
                     imeAction = ImeAction.Search
                 ),
-                // 2. Define what happens when "Search" is pressed
                 keyboardActions = KeyboardActions(
                     onSearch = {
                         if (url.isNotBlank()) {
-                            keyboardController?.hide() // Hide keyboard
-                            vm.fetchInfo()             // Trigger search
+                            keyboardController?.hide()
+                            vm.fetchInfo()
                         }
                     }
                 ),
@@ -372,33 +430,44 @@ private fun UrlInputField(
                 ),
                 modifier = Modifier.weight(1f),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    color = TextWhite, fontSize = 14.sp
+                    color = TextWhite,
+                    fontSize = 14.sp,
+                    letterSpacing = 0.1.sp
                 )
             )
 
             if (url.isNotBlank()) {
                 IconButton(
                     onClick = { onUrlChange("") },
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
-                    Icon(Icons.Default.Close, "Clear", tint = TextMuted, modifier = Modifier.size(20.dp))
+                    Icon(
+                        Icons.Default.Close, "Clear",
+                        tint = TextMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
 
-            IconButton(
+            Surface(
                 onClick = { clipboard.getText()?.text?.let { onUrlChange(it) } },
-                modifier = Modifier.size(36.dp)
+                shape = RoundedCornerShape(8.dp),
+                color = CyanSurface,
+                modifier = Modifier.size(34.dp)
             ) {
-                Icon(Icons.Default.ContentPaste, "Paste", tint = TextMuted, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.ContentPaste, "Paste",
+                    tint = CyanMuted,
+                    modifier = Modifier.padding(8.dp).size(18.dp)
+                )
             }
         }
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     CYAN BUTTON
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  CYAN BUTTON
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun CyanButton(
     text: String,
@@ -415,17 +484,17 @@ private fun CyanButton(
             enabled = enabled,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (subtitle != null) 64.dp else 52.dp),
-            shape = RoundedCornerShape(14.dp),
+                .height(if (subtitle != null) 66.dp else 52.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = CyanPrimary,
                 contentColor = DarkNavy,
-                disabledContainerColor = CyanDark.copy(alpha = 0.3f),
+                disabledContainerColor = CyanDark.copy(alpha = 0.25f),
                 disabledContentColor = TextDark
             ),
             elevation = ButtonDefaults.buttonElevation(
-                defaultElevation = 4.dp,
-                pressedElevation = 8.dp
+                defaultElevation = 6.dp,
+                pressedElevation = 10.dp
             )
         ) {
             if (loading) {
@@ -442,16 +511,16 @@ private fun CyanButton(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Black,
                     fontSize = 15.sp,
-                    letterSpacing = 1.sp
+                    letterSpacing = 1.2.sp
                 )
                 if (subtitle != null) {
                     Text(
                         subtitle,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
-                        color = DarkNavy.copy(alpha = 0.7f)
+                        color = DarkNavy.copy(alpha = 0.65f)
                     )
                 }
             }
@@ -463,7 +532,7 @@ private fun CyanButton(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(16.dp),
             border = ButtonDefaults.outlinedButtonBorder.copy(
                 brush = Brush.horizontalGradient(listOf(CyanDark, CyanMuted))
             ),
@@ -485,18 +554,18 @@ private fun CyanButton(
             }
             Text(
                 text,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
-                color = CyanPrimary
+                color = CyanPrimary,
+                letterSpacing = 0.5.sp
             )
         }
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     VIDEO CARD
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  VIDEO CARD
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun VideoCard(d: VideoDetails) {
     GlowCard {
@@ -514,25 +583,38 @@ private fun VideoCard(d: VideoDetails) {
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                            .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
                     )
                 }
+
+                // Gradient overlay at bottom
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))
+                            )
+                        )
+                )
 
                 // Duration badge
                 if (d.duration > 0) {
                     Surface(
-                        color = Color.Black.copy(alpha = 0.75f),
-                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.8f),
+                        shape = RoundedCornerShape(8.dp),
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(10.dp)
+                            .padding(12.dp)
                     ) {
                         Text(
                             formatDuration(d.duration),
                             color = Color.White,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
                 }
@@ -540,8 +622,8 @@ private fun VideoCard(d: VideoDetails) {
 
             // Info
             Column(
-                Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
                     d.title,
@@ -550,21 +632,29 @@ private fun VideoCard(d: VideoDetails) {
                     fontSize = 16.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    lineHeight = 22.sp
+                    lineHeight = 22.sp,
+                    letterSpacing = (-0.2).sp
                 )
+
                 d.author?.let { author ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Outlined.AccountCircle,
-                            null,
-                            tint = CyanMuted,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = CyanSurface,
+                            modifier = Modifier.size(22.dp)
+                        ) {
+                            Icon(
+                                Icons.Outlined.AccountCircle, null,
+                                tint = CyanMuted,
+                                modifier = Modifier.padding(3.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
                         Text(
                             author,
                             color = TextMuted,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -573,10 +663,9 @@ private fun VideoCard(d: VideoDetails) {
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     PLAYLIST CARD
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  PLAYLIST CARD
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun PlaylistCard(
     info: PlaylistInfo,
@@ -585,29 +674,29 @@ private fun PlaylistCard(
 ) {
     GlowCard(borderColor = CyanDark.copy(alpha = 0.4f)) {
         Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     color = CyanSurface,
                     shape = CircleShape,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(38.dp)
                 ) {
                     Icon(
-                        Icons.Default.PlaylistPlay,
-                        null,
+                        Icons.Default.PlaylistPlay, null,
                         tint = CyanPrimary,
-                        modifier = Modifier.padding(6.dp)
+                        modifier = Modifier.padding(7.dp)
                     )
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(14.dp))
                 Column {
                     Text(
                         "Playlist Detected",
                         color = CyanLight,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 15.sp,
+                        letterSpacing = (-0.2).sp
                     )
                     Text(
                         "${info.title} · ${info.count} videos",
@@ -619,44 +708,53 @@ private fun PlaylistCard(
                 }
             }
 
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = CardLight.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    if (downloadAsPlaylist) "Download all ${info.count} videos"
-                    else "Download single video only",
-                    color = TextLight,
-                    fontSize = 13.sp
-                )
-                Switch(
-                    checked = downloadAsPlaylist,
-                    onCheckedChange = onToggle,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = CyanPrimary,
-                        checkedTrackColor = CyanDark.copy(alpha = 0.4f),
-                        uncheckedThumbColor = TextMuted,
-                        uncheckedTrackColor = CardBorder
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            if (downloadAsPlaylist) "Download all ${info.count} videos"
+                            else "Single video only",
+                            color = TextLight,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        if (downloadAsPlaylist) {
+                            Text(
+                                "Videos download sequentially",
+                                color = TextDark,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = downloadAsPlaylist,
+                        onCheckedChange = onToggle,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = CyanPrimary,
+                            checkedTrackColor = CyanDark.copy(alpha = 0.4f),
+                            uncheckedThumbColor = TextMuted,
+                            uncheckedTrackColor = CardBorder
+                        )
                     )
-                )
-            }
-
-            if (downloadAsPlaylist) {
-                Text(
-                    "💡 Videos download one-by-one to save storage",
-                    color = TextDark,
-                    fontSize = 11.sp
-                )
+                }
             }
         }
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     QUALITY SELECTOR
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  QUALITY SELECTOR
+ * ═══════════════════════════════════════════════════════ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QualitySelector(
@@ -666,33 +764,47 @@ private fun QualitySelector(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("QUALITY", color = TextMuted, fontSize = 11.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
-            modifier = Modifier.padding(start = 4.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "QUALITY",
+            color = TextMuted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.5.sp,
+            modifier = Modifier.padding(start = 4.dp)
+        )
 
         ExposedDropdownMenuBox(
             expanded = expanded,
             onExpandedChange = { expanded = !expanded }
         ) {
-            GlowCard {
+            GlowCard(
+                borderColor = if (expanded) CyanDark.copy(alpha = 0.5f)
+                else CardBorder
+            ) {
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .menuAnchor()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (selected.isAudioOnly) Icons.Default.MusicNote
-                            else Icons.Default.HighQuality,
-                            null,
-                            tint = CyanPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = CyanSurface,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                if (selected.isAudioOnly) Icons.Default.MusicNote
+                                else Icons.Default.HighQuality,
+                                null,
+                                tint = CyanPrimary,
+                                modifier = Modifier.padding(6.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
                         Column {
                             Text(
                                 selected.label,
@@ -701,12 +813,18 @@ private fun QualitySelector(
                                 fontSize = 14.sp
                             )
                             formatSizes[selected]?.let { size ->
-                                Text(size, color = CyanMuted, fontSize = 11.sp)
+                                Text(
+                                    size,
+                                    color = CyanMuted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
                     }
                     Icon(
-                        Icons.Default.KeyboardArrowDown,
+                        if (expanded) Icons.Default.KeyboardArrowUp
+                        else Icons.Default.KeyboardArrowDown,
                         null,
                         tint = TextMuted,
                         modifier = Modifier.size(22.dp)
@@ -718,23 +836,28 @@ private fun QualitySelector(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
                 containerColor = CardDark,
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 // Video Section
-                QualitySectionHeader("📹 Video")
-                VideoQuality.entries.filter { it.isVideo && !it.name.startsWith("BEST_") &&
-                        it != VideoQuality.SMALLEST && it != VideoQuality.COMPATIBLE
-                        && it != VideoQuality.MAX_QUALITY  // ✅ ADD this exclusion
+                QualitySectionHeader("🎬 Video")
+                VideoQuality.entries.filter {
+                    it.isVideo && !it.name.startsWith("BEST_") &&
+                            it != VideoQuality.SMALLEST &&
+                            it != VideoQuality.COMPATIBLE &&
+                            it != VideoQuality.MAX_QUALITY
                 }.forEach { q ->
                     QualityMenuItem(q, formatSizes[q], selected == q) {
                         onSelect(q); expanded = false
                     }
                 }
 
-                HorizontalDivider(color = CardBorder, modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(
+                    color = CardBorder,
+                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 12.dp)
+                )
 
                 // Smart Section
-                QualitySectionHeader("🎯 Smart")
+                QualitySectionHeader("⚡ Smart")
                 listOfNotNull(
                     VideoQuality.entries.find { it.name == "MAX_QUALITY" },
                     VideoQuality.entries.find { it.name == "SMALLEST" },
@@ -745,7 +868,10 @@ private fun QualitySelector(
                     }
                 }
 
-                HorizontalDivider(color = CardBorder, modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(
+                    color = CardBorder,
+                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 12.dp)
+                )
 
                 // Audio Section
                 QualitySectionHeader("🎵 Audio Only")
@@ -767,7 +893,7 @@ private fun QualitySectionHeader(title: String) {
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 1.sp,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
     )
 }
 
@@ -787,8 +913,12 @@ private fun QualityMenuItem(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (isSelected) {
-                        Icon(Icons.Default.Check, null, Modifier.size(16.dp), tint = CyanPrimary)
-                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Default.Check, null,
+                            Modifier.size(16.dp),
+                            tint = CyanPrimary
+                        )
+                        Spacer(Modifier.width(8.dp))
                     }
                     Text(
                         q.label,
@@ -798,58 +928,71 @@ private fun QualityMenuItem(
                     )
                 }
                 if (!size.isNullOrBlank()) {
-                    Text(
-                        size,
-                        color = CyanMuted,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = CyanSurface
+                    ) {
+                        Text(
+                            size,
+                            color = CyanMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
         },
         onClick = onClick,
         leadingIcon = {
             Icon(
-                if (q.isAudioOnly) Icons.Default.MusicNote else Icons.Default.Videocam,
-                null, Modifier.size(18.dp), tint = TextDark
+                if (q.isAudioOnly) Icons.Default.MusicNote
+                else Icons.Default.Videocam,
+                null,
+                Modifier.size(18.dp),
+                tint = TextDark
             )
         },
-        colors = MenuDefaults.itemColors(
-            textColor = TextLight
+        colors = MenuDefaults.itemColors(textColor = TextLight),
+        modifier = Modifier.background(
+            if (isSelected) CyanSurface.copy(alpha = 0.3f) else Color.Transparent
         )
     )
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     LOCATION CHIP
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  LOCATION CHIP
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun LocationChip(location: DownloadLocation) {
     Surface(
         color = CyanSurface,
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.border(1.dp, CyanDark.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
+        shape = RoundedCornerShape(22.dp),
+        border = BorderStroke(1.dp, CyanDark.copy(alpha = 0.3f))
     ) {
         Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Outlined.Folder, null, tint = CyanMuted, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
+            Icon(
+                Icons.Outlined.Folder, null,
+                tint = CyanMuted,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(Modifier.width(8.dp))
             Text(
                 "Saving to: ${location.label}",
                 color = CyanLight,
-                fontSize = 12.sp
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
             )
         }
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     DOWNLOAD PROGRESS
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  DOWNLOAD PROGRESS
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun DownloadProgress(
     progress: Float, eta: Long, line: String,
@@ -864,8 +1007,8 @@ private fun DownloadProgress(
 
     GlowCard(borderColor = CyanDark.copy(alpha = 0.5f)) {
         Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Header
             Row(
@@ -874,30 +1017,57 @@ private fun DownloadProgress(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        Modifier.size(18.dp),
-                        color = CyanPrimary,
-                        strokeWidth = 2.dp
+                    // Animated pulsing indicator
+                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                    val alpha by infiniteTransition.animateFloat(
+                        initialValue = 0.4f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1000),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulse_alpha"
                     )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        "Downloading…",
-                        color = CyanLight,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
+                    Surface(
+                        shape = CircleShape,
+                        color = CyanPrimary.copy(alpha = alpha * 0.2f),
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Download, null,
+                            tint = CyanPrimary,
+                            modifier = Modifier.padding(6.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            "Downloading…",
+                            color = CyanLight,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                        if (eta > 0) {
+                            Text(
+                                "~${eta}s remaining",
+                                color = TextDark,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                 }
+
                 if (totalItems > 1) {
                     Surface(
-                        color = CyanDark.copy(alpha = 0.3f),
-                        shape = RoundedCornerShape(8.dp)
+                        color = CyanSurface,
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
                             "$currentItem / $totalItems",
                             color = CyanPrimary,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
                         )
                     }
                 }
@@ -906,7 +1076,7 @@ private fun DownloadProgress(
             // Current video title
             if (totalItems > 1 && currentVideoTitle.isNotBlank()) {
                 Text(
-                    "🎬 $currentVideoTitle",
+                    "▶ $currentVideoTitle",
                     color = TextMuted,
                     fontSize = 12.sp,
                     maxLines = 1,
@@ -915,34 +1085,48 @@ private fun DownloadProgress(
             }
 
             // Progress bar
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(ProgressTrack)
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(
                     Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(animatedProgress)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(CyanDark, CyanPrimary, CyanLight)
+                        .fillMaxWidth()
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(ProgressTrack)
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(animatedProgress)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(CyanDark, CyanPrimary, CyanLight)
+                                )
                             )
-                        )
-                )
-            }
+                    )
+                }
 
-            // Stats row
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("${progress.toInt()}%", color = CyanPrimary, fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold)
-                if (eta > 0) Text("ETA ${eta}s", color = TextMuted, fontSize = 12.sp)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "${progress.toInt()}%",
+                        color = CyanPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    if (line.isNotBlank()) {
+                        Text(
+                            line,
+                            color = TextDark,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false).padding(start = 12.dp)
+                        )
+                    }
+                }
             }
 
             // Overall progress for playlists
@@ -950,54 +1134,61 @@ private fun DownloadProgress(
                 val overallPercent = ((currentItem - 1) * 100f + progress) / totalItems
                 val animatedOverall by animateFloatAsState(
                     targetValue = (overallPercent / 100f).coerceIn(0f, 1f),
-                    animationSpec = tween(300), label = "overall"
+                    animationSpec = tween(300),
+                    label = "overall"
                 )
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(ProgressTrack)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(
                         Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(animatedOverall)
+                            .fillMaxWidth()
+                            .height(4.dp)
                             .clip(RoundedCornerShape(2.dp))
-                            .background(ProgressTeal)
+                            .background(ProgressTrack)
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(animatedOverall)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(ProgressTeal)
+                        )
+                    }
+                    Text(
+                        "Overall: ${overallPercent.toInt()}%",
+                        color = ProgressTeal,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
-                Text("Overall: ${overallPercent.toInt()}%", color = ProgressTeal, fontSize = 11.sp)
-            }
-
-            // Status line
-            if (line.isNotBlank()) {
-                Text(line, color = TextDark, fontSize = 10.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
 
             // Cancel
             OutlinedButton(
                 onClick = onCancel,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
                 border = ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = Brush.horizontalGradient(listOf(ErrorRed.copy(alpha = 0.5f), ErrorRed.copy(alpha = 0.3f)))
+                    brush = Brush.horizontalGradient(
+                        listOf(ErrorRed.copy(alpha = 0.5f), ErrorRed.copy(alpha = 0.3f))
+                    )
                 ),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed)
             ) {
                 Icon(Icons.Default.Cancel, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Cancel", fontSize = 13.sp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Cancel Download",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     COMPLETED CARD
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  COMPLETED CARD
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun CompletedCard(
     savedLocation: String, fileCount: Int,
@@ -1007,51 +1198,95 @@ private fun CompletedCard(
 
     GlowCard(borderColor = SuccessGreen.copy(alpha = 0.3f)) {
         Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     color = SuccessSurface,
                     shape = CircleShape,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        Icons.Default.CheckCircle,
-                        null,
+                        Icons.Default.CheckCircle, null,
                         tint = SuccessGreen,
-                        modifier = Modifier.padding(4.dp)
+                        modifier = Modifier.padding(6.dp)
                     )
                 }
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    "Saved to Gallery",
-                    color = SuccessGreen,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text(
+                        "Download Complete!",
+                        color = SuccessGreen,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        letterSpacing = (-0.2).sp
+                    )
+                    Text(
+                        "Saved to Gallery",
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
             }
 
             // Stats
             if (fileCount > 1 || failedCount > 0) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text("✅ $fileCount saved", color = SuccessGreen, fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = SuccessSurface
+                    ) {
+                        Text(
+                            "✓ $fileCount saved",
+                            color = SuccessGreen,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
                     if (failedCount > 0) {
-                        Text("❌ $failedCount failed", color = ErrorRed, fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = ErrorSurface
+                        ) {
+                            Text(
+                                "✗ $failedCount failed",
+                                color = ErrorRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
             }
 
             // Path
-            Text(
-                "📁 $savedLocation",
-                color = TextMuted,
-                fontSize = 12.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = CardLight.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Outlined.Folder, null,
+                        tint = TextDark,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        savedLocation,
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
 
             // Buttons
             if (lastFile != null) {
@@ -1062,37 +1297,29 @@ private fun CompletedCard(
                     OutlinedButton(
                         onClick = { openSavedFile(context, lastFile) },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         border = ButtonDefaults.outlinedButtonBorder.copy(
-                            brush = Brush.horizontalGradient(
-                                listOf(CardBorder, CardBorder)
-                            )
+                            brush = Brush.horizontalGradient(listOf(CardBorder, CardBorder))
                         ),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = TextLight
-                        )
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
                     ) {
                         Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Open File", fontSize = 13.sp)
+                        Text("Open", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     OutlinedButton(
                         onClick = { shareSavedFile(context, lastFile) },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         border = ButtonDefaults.outlinedButtonBorder.copy(
-                            brush = Brush.horizontalGradient(
-                                listOf(CardBorder, CardBorder)
-                            )
+                            brush = Brush.horizontalGradient(listOf(CardBorder, CardBorder))
                         ),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = TextLight
-                        )
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
                     ) {
                         Icon(Icons.Default.Share, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Share", fontSize = 13.sp)
+                        Text("Share", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -1100,10 +1327,9 @@ private fun CompletedCard(
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     SETTINGS PANEL
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  SETTINGS PANEL
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun SettingsPanel(
     currentLocation: DownloadLocation,
@@ -1117,23 +1343,51 @@ private fun SettingsPanel(
 ) {
     GlowCard(borderColor = CyanDark.copy(alpha = 0.3f)) {
         Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                "⚙️  SETTINGS",
-                color = CyanPrimary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-                letterSpacing = 2.sp
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = CyanSurface,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.Settings, null,
+                        tint = CyanPrimary,
+                        modifier = Modifier.padding(5.dp)
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "QUICK SETTINGS",
+                    color = CyanPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    letterSpacing = 2.sp
+                )
+            }
 
             // Location
-            Text("Save location", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "SAVE LOCATION",
+                color = TextMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
 
             DownloadLocation.entries.filter { it != DownloadLocation.CUSTOM }.forEach { loc ->
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onLocationChange(loc) }
+                        .background(
+                            if (currentLocation == loc) CyanSurface
+                            else Color.Transparent
+                        )
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     RadioButton(
@@ -1142,13 +1396,15 @@ private fun SettingsPanel(
                         colors = RadioButtonDefaults.colors(
                             selectedColor = CyanPrimary,
                             unselectedColor = TextDark
-                        )
+                        ),
+                        modifier = Modifier.size(20.dp)
                     )
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        "${loc.icon}  ${loc.label}",
+                        "${loc.icon} ${loc.label}",
                         color = if (currentLocation == loc) CyanLight else TextMuted,
-                        fontSize = 13.sp
+                        fontSize = 13.sp,
+                        fontWeight = if (currentLocation == loc) FontWeight.SemiBold else FontWeight.Normal
                     )
                 }
             }
@@ -1156,22 +1412,37 @@ private fun SettingsPanel(
             HorizontalDivider(color = CardBorder)
 
             // Storage
-            Text("Storage", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "STORAGE",
+                color = TextMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
 
             Surface(
                 color = if (storageInfo.cacheSize > 50 * 1024 * 1024)
-                    ErrorSurface else CardLight.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(10.dp)
+                    ErrorSurface else CardLight.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (storageInfo.cacheSize > 50 * 1024 * 1024)
+                        ErrorRed.copy(alpha = 0.2f) else CardBorder
+                )
             ) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("Cache & temp files", color = TextMuted, fontSize = 11.sp)
+                        Text(
+                            "Cache & temp files",
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
                         Text(
                             storageInfo.cacheSizeText,
                             color = if (storageInfo.cacheSize > 50 * 1024 * 1024) ErrorRed
@@ -1183,7 +1454,7 @@ private fun SettingsPanel(
                     Button(
                         onClick = onClearCache,
                         enabled = !isClearing && storageInfo.cacheSize > 0,
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = ErrorRed.copy(alpha = 0.8f),
                             contentColor = Color.White
@@ -1199,7 +1470,11 @@ private fun SettingsPanel(
                         } else {
                             Icon(Icons.Default.DeleteSweep, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Clear", fontSize = 12.sp)
+                            Text(
+                                "Clear",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
                 }
@@ -1207,34 +1482,45 @@ private fun SettingsPanel(
 
             HorizontalDivider(color = CardBorder)
 
-// YouTube Login
-            Text("YouTube Login", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-
+            // YouTube Login
             Text(
-                "Sign in to fix bot detection errors on some networks",
-                color = TextDark,
-                fontSize = 11.sp
+                "YOUTUBE LOGIN",
+                color = TextMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
             )
 
             Surface(
-                color = if (hasCookies) SuccessSurface else CardLight.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(10.dp)
+                color = if (hasCookies) SuccessSurface else CardLight.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (hasCookies) SuccessGreen.copy(alpha = 0.15f) else CardBorder
+                )
             ) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (hasCookies) Icons.Default.CheckCircle
-                            else Icons.Default.AccountCircle,
-                            null,
-                            tint = if (hasCookies) SuccessGreen else TextMuted,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = if (hasCookies) SuccessGreen.copy(alpha = 0.15f)
+                            else CardLight,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                if (hasCookies) Icons.Default.CheckCircle
+                                else Icons.Default.AccountCircle,
+                                null,
+                                tint = if (hasCookies) SuccessGreen else TextMuted,
+                                modifier = Modifier.padding(6.dp)
+                            )
+                        }
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text(
@@ -1245,21 +1531,25 @@ private fun SettingsPanel(
                             )
                             Text(
                                 if (hasCookies) "Bot detection bypassed"
-                                else "May get errors on some networks",
-                                color = TextMuted,
+                                else "May help fix errors",
+                                color = TextDark,
                                 fontSize = 11.sp
                             )
                         }
                     }
-
                     if (hasCookies) {
                         TextButton(onClick = onLogout) {
-                            Text("Logout", color = ErrorRed, fontSize = 12.sp)
+                            Text(
+                                "Logout",
+                                color = ErrorRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     } else {
                         Button(
                             onClick = onLogin,
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = CyanPrimary,
                                 contentColor = DarkNavy
@@ -1268,14 +1558,18 @@ private fun SettingsPanel(
                         ) {
                             Icon(Icons.Default.Login, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Sign in", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Sign in",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
             }
 
+            // Credits
             val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1302,64 +1596,95 @@ private fun SettingsPanel(
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     ERROR CARD
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  ERROR CARD
+ * ═══════════════════════════════════════════════════════ */
 @Composable
 private fun ErrorCard(msg: String, onDismiss: () -> Unit, onRetry: () -> Unit) {
     GlowCard(borderColor = ErrorRed.copy(alpha = 0.4f)) {
         Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     color = ErrorSurface,
                     shape = CircleShape,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
-                    Icon(Icons.Default.Error, null, tint = ErrorRed,
-                        modifier = Modifier.padding(4.dp))
+                    Icon(
+                        Icons.Default.Error, null,
+                        tint = ErrorRed,
+                        modifier = Modifier.padding(6.dp)
+                    )
                 }
-                Spacer(Modifier.width(10.dp))
-                Text("Error", color = ErrorRed, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(
+                        "Something went wrong",
+                        color = ErrorRed,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Text(
+                        "Tap to copy error details",
+                        color = TextDark,
+                        fontSize = 11.sp
+                    )
+                }
             }
 
-            SelectionContainer {
-                Text(
-                    msg, color = TextMuted, fontSize = 11.sp,
-                    modifier = Modifier
-                        .heightIn(max = 150.dp)
-                        .verticalScroll(rememberScrollState())
-                )
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = CardLight.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                SelectionContainer {
+                    Text(
+                        msg,
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .heightIn(max = 150.dp)
+                            .verticalScroll(rememberScrollState())
+                    )
+                }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
                     onClick = onRetry,
-                    shape = RoundedCornerShape(8.dp),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(
-                        brush = Brush.horizontalGradient(listOf(CyanDark, CyanDark))
-                    ),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanPrimary)
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CyanPrimary,
+                        contentColor = DarkNavy
+                    )
                 ) {
                     Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Retry", fontSize = 12.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Retry",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
                 TextButton(onClick = onDismiss) {
-                    Text("Dismiss", color = TextMuted, fontSize = 12.sp)
+                    Text(
+                        "Dismiss",
+                        color = TextMuted,
+                        fontSize = 13.sp
+                    )
                 }
             }
         }
     }
 }
 
-/* ═══════════════════════════════════════════════════════════
- *                     HELPERS
- * ═══════════════════════════════════════════════════════════ */
-
+/* ═══════════════════════════════════════════════════════
+ *  HELPERS
+ * ═══════════════════════════════════════════════════════ */
 private fun formatDuration(seconds: Long): String {
     val h = seconds / 3600; val m = (seconds % 3600) / 60; val s = seconds % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
@@ -1369,18 +1694,22 @@ private fun getFileUri(context: Context, fileInfo: SavedFileInfo): Uri {
     if (fileInfo.contentUri != null) return Uri.parse(fileInfo.contentUri)
     if (fileInfo.absolutePath != null)
         return FileProvider.getUriForFile(
-            context, "${context.packageName}.provider", File(fileInfo.absolutePath))
+            context, "${context.packageName}.provider", File(fileInfo.absolutePath)
+        )
     throw IllegalStateException("No URI")
 }
 
 private fun openSavedFile(context: Context, fileInfo: SavedFileInfo) {
     try {
         val uri = getFileUri(context, fileInfo)
-        context.startActivity(Intent.createChooser(
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, fileInfo.mimeType)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }, "Open with"))
+        context.startActivity(
+            Intent.createChooser(
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, fileInfo.mimeType)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }, "Open with"
+            )
+        )
     } catch (_: Exception) {
         Toast.makeText(context, "No app found to open this file", Toast.LENGTH_SHORT).show()
     }
@@ -1389,12 +1718,15 @@ private fun openSavedFile(context: Context, fileInfo: SavedFileInfo) {
 private fun shareSavedFile(context: Context, fileInfo: SavedFileInfo) {
     try {
         val uri = getFileUri(context, fileInfo)
-        context.startActivity(Intent.createChooser(
-            Intent(Intent.ACTION_SEND).apply {
-                type = fileInfo.mimeType
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }, "Share via"))
+        context.startActivity(
+            Intent.createChooser(
+                Intent(Intent.ACTION_SEND).apply {
+                    type = fileInfo.mimeType
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }, "Share via"
+            )
+        )
     } catch (_: Exception) {
         Toast.makeText(context, "Failed to share", Toast.LENGTH_SHORT).show()
     }

@@ -1,126 +1,66 @@
 package com.example.youtubedownloader.ui.theme
 
-import android.app.Activity
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.Typography
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-import androidx.core.view.WindowCompat
+import androidx.compose.ui.platform.LocalContext
 
-private val DarkBlueColorScheme = darkColorScheme(
-    primary = CyanPrimary,
-    onPrimary = DarkNavy,
-    primaryContainer = CyanDark,
-    onPrimaryContainer = TextWhite,
-
-    secondary = CyanMuted,
-    onSecondary = TextWhite,
-    secondaryContainer = CardMedium,
-    onSecondaryContainer = CyanLight,
-
-    tertiary = ProgressTeal,
-    onTertiary = DarkNavy,
-    tertiaryContainer = WarningTertiaryContainer,
-    onTertiaryContainer = WarningAmber,
-
-    background = DarkNavy,
-    onBackground = TextWhite,
-
-    surface = CardDark,
-    onSurface = TextWhite,
-    surfaceVariant = CardMedium,
-    onSurfaceVariant = TextLight,
-
-    error = ErrorRed,
-    onError = TextWhite,
-    errorContainer = ErrorSurface,
-    onErrorContainer = ErrorRed,
-
-    outline = CardBorder,
-    outlineVariant = Color(0xFF1E3654),
-
-    inverseSurface = TextWhite,
-    inverseOnSurface = DarkNavy,
+private val DarkColorScheme = darkColorScheme(
+    primary = Color(0xFF00E5FF),
+    onPrimary = Color(0xFF0A1929),
+    primaryContainer = Color(0xFF004D61),
+    onPrimaryContainer = Color(0xFF97F0FF),
+    secondary = Color(0xFF4FC3F7),
+    onSecondary = Color(0xFF0A1929),
+    tertiary = Color(0xFF80DEEA),
+    background = Color(0xFF0A1929),
+    onBackground = Color(0xFFE1E2E8),
+    surface = Color(0xFF101D2E),
+    onSurface = Color(0xFFE1E2E8),
+    surfaceVariant = Color(0xFF1A2A3A),
+    onSurfaceVariant = Color(0xFFA0AEC0),
+    error = Color(0xFFFF6B6B),
+    onError = Color(0xFF1A1A1A)
 )
 
-private val AppTypography = Typography(
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize = 22.sp,
-        letterSpacing = 1.sp,
-        color = CyanPrimary
-    ),
-    titleMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize = 16.sp,
-        color = TextWhite
-    ),
-    titleSmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 14.sp,
-        color = TextLight
-    ),
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        color = TextWhite
-    ),
-    bodyMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        color = TextLight
-    ),
-    bodySmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 12.sp,
-        color = TextMuted
-    ),
-    labelMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 12.sp,
-        color = CyanPrimary
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 11.sp,
-        color = TextMuted
-    ),
+private val LightColorScheme = lightColorScheme(
+    primary = Color(0xFF006B7A),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFF97F0FF),
+    onPrimaryContainer = Color(0xFF001F26),
+    secondary = Color(0xFF0288D1),
+    onSecondary = Color(0xFFFFFFFF),
+    tertiary = Color(0xFF00838F),
+    background = Color(0xFFF8FAFE),
+    onBackground = Color(0xFF1A1C1E),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF1A1C1E),
+    surfaceVariant = Color(0xFFECF0F4),
+    onSurfaceVariant = Color(0xFF42474E),
+    error = Color(0xFFBA1A1A),
+    onError = Color(0xFFFFFFFF)
 )
 
 @Composable
-fun YoutubeDownloaderTheme(content: @Composable () -> Unit) {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as Activity).window
-            window.statusBarColor = DarkNavy.toArgb()
-            window.navigationBarColor = DarkNavy.toArgb()
-            WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = false
-                isAppearanceLightNavigationBars = false
-            }
+fun YoutubeDownloaderTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context)
+            else dynamicLightColorScheme(context)
         }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
     }
 
     MaterialTheme(
-        colorScheme = DarkBlueColorScheme,
-        typography = AppTypography,
+        colorScheme = colorScheme,
         content = content
     )
 }

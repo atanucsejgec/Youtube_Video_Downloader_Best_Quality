@@ -1,25 +1,21 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    // NO kotlin-android needed
+    // NO ksp needed
 }
 
 android {
     namespace = "com.example.youtubedownloader"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.youtubedownloader"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        // ✅ ADD THIS
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
@@ -43,7 +39,7 @@ android {
     buildFeatures {
         compose = true
     }
-    // ✅ ADD THIS ENTIRE BLOCK — forces native libs to be extracted
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -52,7 +48,7 @@ android {
 }
 
 dependencies {
-    // ── Your existing deps (keep them) ──
+    // ── Existing (keep all) ──
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -70,21 +66,26 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
-    // ✅ ADD EVERYTHING BELOW ──────────────────────────────────
-
-    // Material icons (for Download, Share, etc. icons)
+    // ── Added (no plugins needed) ──
     implementation("androidx.compose.material:material-icons-extended")
-
-    // ViewModel Compose integration
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
+    implementation("androidx.lifecycle:lifecycle-service:2.9.0")
+    implementation("androidx.navigation:navigation-compose:2.8.9")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
+    implementation("androidx.media3:media3-exoplayer:1.6.1")
+    implementation("androidx.media3:media3-ui:1.6.1")
 
-    // youtubedl-android (yt-dlp engine + ffmpeg)
+    // yt-dlp + ffmpeg
     implementation("io.github.junkfood02.youtubedl-android:library:0.17.2")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.17.2")
-    // Coil (image loading for thumbnails)
+
+    // Coil
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // NO Room
+    // NO KSP
 }

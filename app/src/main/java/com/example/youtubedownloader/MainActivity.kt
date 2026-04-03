@@ -1,15 +1,27 @@
 package com.example.youtubedownloader
 
+import android.Manifest
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.example.youtubedownloader.ui.DownloadScreen
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.Color
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.youtubedownloader.ui.MainApp
 import com.example.youtubedownloader.ui.theme.YoutubeDownloaderTheme
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.*
 
 class MainActivity : ComponentActivity() {
 
@@ -24,14 +36,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val notifPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* handled */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleIncomingIntent(intent)
+        requestNotificationPermission()
 
         setContent {
-            YoutubeDownloaderTheme {
-                DownloadScreen()
+            val vm: MainViewModel = viewModel()
+            val isDark by vm.isDarkTheme.collectAsState()
+
+            MaterialTheme(
+                colorScheme = if (isDark) darkColorScheme(
+                    primary = Color(0xFF00E5FF),
+                    background = Color(0xFF0A1929),
+                    surface = Color(0xFF101D2E)
+                ) else lightColorScheme()
+            ) {
+                MainApp(vm = vm)
+            }
+
+            // Auto-paste from clipboard
+            LaunchedEffect(Unit) {
+                val clip = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val text = clip.primaryClip?.getItemAt(0)?.text?.toString()
+                vm.checkClipboardForUrl(text)
             }
         }
     }
@@ -39,6 +72,16 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIncomingIntent(intent)
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
