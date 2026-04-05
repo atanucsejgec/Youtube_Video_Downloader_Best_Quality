@@ -5,8 +5,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
 import com.example.youtubedownloader.ui.DownloadScreen
-import com.example.youtubedownloader.ui.theme.YoutubeDownloaderTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,7 +29,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleIncomingIntent(intent)
-
         setContent {
             YoutubeDownloaderTheme {
                 DownloadScreen()
@@ -66,4 +66,10 @@ class MainActivity : ComponentActivity() {
 
     private fun isYouTubeUrl(url: String): Boolean =
         url.contains("youtube.com") || url.contains("youtu.be") || url.contains("music.youtube.com")
+}
+
+// Theme placeholder - keep your existing theme
+@Composable
+fun YoutubeDownloaderTheme(content: @Composable () -> Unit) {
+    MaterialTheme(content = content)
 }
